@@ -41,6 +41,8 @@ _KNOWN_SOURCES = {
     "weather": ["fields", "locations"],
 }
 
+_KNOWN_STORAGES = {"local", "databricks", "snowflake"}
+
 _SMARD_RESOLUTIONS = {"15min", "hour"}
 
 _SMARD_METHODS = {
@@ -126,6 +128,11 @@ def _validate(data: dict) -> None:
         isinstance(item, str) for item in storages
     ):
         raise ConfigError("storages must be a list of strings")
+    for storage in storages:
+        if storage not in _KNOWN_STORAGES:
+            raise ConfigError(f"unknown storage: {storage}")
+    if "local" not in storages:
+        raise ConfigError("storages must include local: it anchors the fetch watermark")
 
     sources = data["sources"]
     if not isinstance(sources, dict):
@@ -139,6 +146,7 @@ def _validate(data: dict) -> None:
         for required in _KNOWN_SOURCES[name]:
             if required not in source:
                 raise ConfigError(f"source {name} is missing field: {required}")
+        _validate_refresh_days(source, name)
         if name == "entsoe":
             _validate_entsoe_methods(source["methods"])
         if name == "energy_charts":
@@ -147,6 +155,14 @@ def _validate(data: dict) -> None:
             _validate_smard(source)
         if name == "weather":
             _validate_weather(source)
+
+
+def _validate_refresh_days(source: dict, name: str) -> None:
+    if "refresh_days" not in source:
+        return
+    value = source["refresh_days"]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ConfigError(f"source {name} refresh_days must be an integer >= 1")
 
 
 def _validate_entsoe_methods(methods: object) -> None:

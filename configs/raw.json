@@ -4,13 +4,13 @@
     "timezone": "Europe/Berlin",
     "storages": [
         "local",
-        "databricks",
-        "snowflake"
+        "databricks"
     ],
     "sources": {
         "smard": {
             "area": "DE_LU",
             "resolution": "15min",
+            "refresh_days": 7,
             "methods": [
                 {
                     "method": "day_ahead_price"
@@ -49,6 +49,7 @@
             ]
         },
         "energy_charts": {
+            "refresh_days": 7,
             "methods": [
                 {
                     "bidding_zone": "DE-LU",
@@ -66,6 +67,7 @@
             ]
         },
         "entsoe": {
+            "refresh_days": 7,
             "methods": [
                 {
                     "area": "DE_LU",
@@ -106,6 +108,7 @@
         "weather": {
             "model": "ecmwf_ifs",
             "forecast_days": 16,
+            "refresh_days": 3,
             "fields": [
                 "temperature_2m",
                 "wind_speed_100m",

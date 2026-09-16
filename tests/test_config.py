@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from delukit.core.config import ConfigError, RawConfig, load_raw_config
-from delukit.pipelines.raw import run
 
 VALID = {
     "start": "2025-10-01",
@@ -101,10 +100,50 @@ def test_raw_run_uses_raw_config(tmp_path):
     file = tmp_path / "raw.json"
     file.write_text(json.dumps(VALID))
 
-    config = run(str(file))
+    config = load_raw_config(file)
 
     assert isinstance(config, RawConfig)
     assert config.sources["smard"]["resolution"] == "15min"
+
+
+def test_unknown_storage(tmp_path):
+    data = {**VALID, "storages": ["local", "bogus"]}
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match="unknown storage"):
+        load_raw_config(file)
+
+
+def test_storages_must_include_local(tmp_path):
+    data = {**VALID, "storages": ["databricks"]}
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match="local"):
+        load_raw_config(file)
+
+
+@pytest.mark.parametrize("value", [0, -3, 2.5, "7", True])
+def test_invalid_refresh_days(tmp_path, value):
+    data = json.loads(json.dumps(VALID))
+    data["sources"]["smard"]["refresh_days"] = value
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match="refresh_days"):
+        load_raw_config(file)
+
+
+def test_valid_refresh_days(tmp_path):
+    data = json.loads(json.dumps(VALID))
+    data["sources"]["smard"]["refresh_days"] = 2
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    config = load_raw_config(file)
+
+    assert config.sources["smard"]["refresh_days"] == 2
 
 
 ENERGY_CHARTS_VALID = {
