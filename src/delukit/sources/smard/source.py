@@ -41,6 +41,7 @@ class SmardSource(DataSource):
     """Fetches SMARD chart_data JSON, one raw day-document per call key."""
 
     name = "smard"
+    colour = "green"
     limiter = Limiter(Rate(30, Duration.MINUTE))
     max_retries = 3
 

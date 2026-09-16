@@ -64,6 +64,7 @@ _HANDLERS = {
 
 class EntsoeSource(DataSource):
     name = "entsoe"
+    colour = "cyan"
     limiter = Limiter(Rate(400, Duration.MINUTE))
     max_retries = 3
 

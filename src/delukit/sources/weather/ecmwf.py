@@ -31,6 +31,7 @@ _URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 
 class WeatherSource(DataSource):
     name = "weather"
+    colour = "yellow"
     limiter = Limiter(Rate(60, Duration.MINUTE))
     max_retries = 3
 

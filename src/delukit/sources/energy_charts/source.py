@@ -25,6 +25,7 @@ _HANDLERS = {
 
 class EnergyChartsSource(DataSource):
     name = "energy_charts"
+    colour = "magenta"
     limiter = Limiter(Rate(2, Duration.MINUTE))
     max_retries = 3
 

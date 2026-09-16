@@ -6,6 +6,7 @@ and leave parsing to the silver layer.
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -14,8 +15,14 @@ from typing import Any, ClassVar
 
 import requests
 from pyrate_limiter import Limiter
+from tqdm import tqdm
 
 TRANSIENT_STATUSES = frozenset({408, 425, 429})
+
+
+def _progress_disabled() -> bool:
+    """Show progress bars only when stderr is a terminal (not tests/cron)."""
+    return not sys.stderr.isatty()
 
 
 class SourceError(Exception):
@@ -34,6 +41,7 @@ class DataSource(ABC):
     """
 
     name: ClassVar[str] = ""
+    colour: ClassVar[str | None] = None
     limiter: ClassVar[Limiter | None] = None
     max_retries: ClassVar[int] = 3
 
@@ -41,13 +49,23 @@ class DataSource(ABC):
         """Fetch each day in [start, end] separately. Days are never joined.
 
         Each day maps to that day's raw payload(s); an empty mapping means
-        the source has no data for that day.
+        the source has no data for that day. Progress is shown on a tty
+        only.
         """
+        method = params.get("method", "")
         results: dict[date, Any] = {}
         day = start
-        while day <= end:
-            results[day] = self._fetch_day(day, **params)
-            day += timedelta(days=1)
+        with tqdm(
+            total=(end - start).days + 1,
+            desc=f"{self.name} {method}".strip(),
+            colour=self.colour,
+            disable=_progress_disabled(),
+        ) as bar:
+            while day <= end:
+                results[day] = self._fetch_day(day, **params)
+                bar.set_postfix(day=day.isoformat())
+                bar.update()
+                day += timedelta(days=1)
         return results
 
     @abstractmethod

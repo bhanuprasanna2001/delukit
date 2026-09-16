@@ -16,6 +16,7 @@ source has landed.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +28,8 @@ from delukit.sources.data_source import DataSource
 from delukit.storages import build_store
 from delukit.storages.base import BronzeStore
 from delukit.storages.local import LocalStore
+
+log = logging.getLogger("delukit.raw")
 
 _DEFAULT_REFRESH_DAYS = {
     "smard": 7,
@@ -45,34 +48,50 @@ def run(raw_config_path: str) -> RawConfig:
     config = load_raw_config(raw_config_path)
     end = _resolve(config.end, config.timezone)
     begin = _resolve(config.start, config.timezone)
+    log.info(
+        "run start · sources=%s storages=%s window=%s..%s",
+        ", ".join(sorted(config.sources)),
+        ", ".join(config.storages),
+        begin,
+        end,
+    )
 
     stores: dict[str, BronzeStore] = {
         name: build_store(name) for name in config.storages
     }
     anchor = stores.get("local")
     coverage = anchor.coverage() if isinstance(anchor, LocalStore) else set()
+    log.debug("coverage anchor: %d (source, day) pairs", len(coverage))
 
     fetched_at = datetime.now(UTC).replace(tzinfo=None)
     failures: list[str] = []
     for name, source_config in config.sources.items():
         window_start = _window_start(name, source_config, begin, coverage)
         if window_start > end:
+            log.info("%s: nothing new to fetch", name)
             continue
+        log.debug("%s: fetching %s..%s", name, window_start, end)
         source = build_source(name, source_config, config.timezone)
         try:
             records = _fetch_source(
                 source, name, source_config, window_start, end, fetched_at
             )
         except Exception as error:  # noqa: BLE001 — a source may raise anything; isolate it
+            log.error("%s failed: %s", name, error)
             failures.append(f"{name}: {error}")
             continue
+        log.info("%s: %d records", name, len(records))
         for store_name, store in stores.items():
             try:
-                store.write(records)
+                written = store.write(records)
+                log.info("  -> %s: %d rows", store_name, written)
             except Exception as error:  # noqa: BLE001 — a down store must not block the rest
+                log.error("%s -> %s failed: %s", name, store_name, error)
                 failures.append(f"{name} -> {store_name}: {error}")
     if failures:
+        log.error("run failed: %s", "; ".join(failures))
         raise PipelineError("; ".join(failures))
+    log.info("run complete")
     return config
 
 
@@ -128,6 +147,7 @@ def _fetch_source(
             if key not in ("method", "fetch_policy")
         }
         kwargs = {} if name == "weather" else {**common, "method": method, **params}
+        log.debug("%s.%s: fetching", name, method)
         raws = source.fetch(start, end, **kwargs)
         records.extend(make_records(name, raws, fetched_at))
     return records
