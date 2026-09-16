@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from delukit.layers.bronze.records import RECORD_COLUMNS
 
 # ponytail: fixed batch; raise it if payload sizes or counts grow
-_BATCH_SIZE = 20
+_BATCH_SIZE = 100
 
 
 class BronzeStore(ABC):
