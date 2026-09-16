@@ -66,6 +66,18 @@ _ENTSOE_METHODS = {
 
 _ENERGY_CHARTS_METHODS = {"day_ahead_price"}
 
+_WEATHER_MODELS = {"ecmwf_ifs", "ecmwf_ifs025", "gfs_seamless"}
+
+_WEATHER_FIELDS = {
+    "temperature_2m",
+    "wind_speed_100m",
+    "wind_direction_100m",
+    "shortwave_radiation",
+    "cloud_cover",
+}
+
+_WEATHER_CELL_SELECTIONS = {"land", "sea", "nearest"}
+
 
 def _read(path: str | Path) -> str:
     file = Path(path)
@@ -133,6 +145,8 @@ def _validate(data: dict) -> None:
             _validate_energy_charts_methods(source["methods"])
         if name == "smard":
             _validate_smard(source)
+        if name == "weather":
+            _validate_weather(source)
 
 
 def _validate_entsoe_methods(methods: object) -> None:
@@ -223,6 +237,67 @@ def _validate_smard_methods(methods: object) -> None:
                     f"smard method {method} generation_types must be "
                     "a non-empty list of strings"
                 )
+
+
+def _validate_weather(source: object) -> None:
+    if not isinstance(source, dict):
+        raise ConfigError("source must be an object: weather")
+
+    forecast_days = source.get("forecast_days", 16)
+    if (
+        isinstance(forecast_days, bool)
+        or not isinstance(forecast_days, int)
+        or not 1 <= forecast_days <= 16
+    ):
+        raise ConfigError("weather forecast_days must be an integer from 1 to 16")
+
+    model = source.get("model", "ecmwf_ifs")
+    if not isinstance(model, str) or model not in _WEATHER_MODELS:
+        raise ConfigError(f"unknown weather model: {model!r}")
+
+    fields = source.get("fields")
+    if (
+        not isinstance(fields, list)
+        or not fields
+        or not all(isinstance(field, str) for field in fields)
+    ):
+        raise ConfigError("weather fields must be a non-empty list of strings")
+    for field in fields:
+        if field not in _WEATHER_FIELDS:
+            raise ConfigError(f"unknown weather field: {field}")
+
+    locations = source.get("locations")
+    if not isinstance(locations, list) or not locations:
+        raise ConfigError("weather locations must be a non-empty list")
+    names: set[str] = set()
+    for location in locations:
+        if not isinstance(location, dict):
+            raise ConfigError("weather location entries must be objects")
+        for field in ("name", "latitude", "longitude", "cell_selection"):
+            if field not in location:
+                raise ConfigError(f"weather location is missing field: {field}")
+        name = location["name"]
+        if not isinstance(name, str):
+            raise ConfigError("weather location name must be a string")
+        if name in names:
+            raise ConfigError(f"duplicate weather location: {name}")
+        names.add(name)
+        latitude = location["latitude"]
+        longitude = location["longitude"]
+        for field, value, low, high in (
+            ("latitude", latitude, -90, 90),
+            ("longitude", longitude, -180, 180),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ConfigError(f"weather location {name} {field} must be a number")
+            if not low <= value <= high:
+                raise ConfigError(
+                    f"weather location {name} {field} must be within {low} and {high}"
+                )
+        if location["cell_selection"] not in _WEATHER_CELL_SELECTIONS:
+            raise ConfigError(
+                f"weather location {name} cell_selection must be land, sea or nearest"
+            )
 
 
 def load_raw_config(path: str | Path) -> RawConfig:

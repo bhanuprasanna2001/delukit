@@ -21,7 +21,19 @@ VALID = {
                 {"method": "generation_actual", "generation_types": ["solar"]},
             ],
         },
-        "weather": {"fields": ["temperature_2m"], "locations": []},
+        "weather": {
+            "model": "ecmwf_ifs",
+            "forecast_days": 16,
+            "fields": ["temperature_2m"],
+            "locations": [
+                {
+                    "name": "berlin",
+                    "latitude": 52.52,
+                    "longitude": 13.41,
+                    "cell_selection": "land",
+                }
+            ],
+        },
     },
 }
 
@@ -317,4 +329,147 @@ def test_invalid_smard_area(tmp_path):
     file.write_text(json.dumps(smard_config(area=5)))
 
     with pytest.raises(ConfigError, match="smard area must be a string"):
+        load_raw_config(file)
+
+
+WEATHER_VALID = {
+    "start": "2025-10-01",
+    "end": "latest",
+    "timezone": "Europe/Berlin",
+    "storages": ["local"],
+    "sources": {
+        "weather": {
+            "model": "ecmwf_ifs",
+            "forecast_days": 16,
+            "fields": ["temperature_2m", "wind_speed_100m"],
+            "locations": [
+                {
+                    "name": "berlin",
+                    "latitude": 52.52,
+                    "longitude": 13.41,
+                    "cell_selection": "land",
+                },
+                {
+                    "name": "north_sea_west",
+                    "latitude": 54.75,
+                    "longitude": 6.30,
+                    "cell_selection": "sea",
+                },
+            ],
+        }
+    },
+}
+
+
+def weather_config(**overrides):
+    data = json.loads(json.dumps(WEATHER_VALID))
+    data["sources"]["weather"].update(overrides)
+    return data
+
+
+def test_valid_weather(tmp_path):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(WEATHER_VALID))
+
+    config = load_raw_config(file)
+
+    weather = config.sources["weather"]
+    assert weather["model"] == "ecmwf_ifs"
+    assert weather["forecast_days"] == 16
+    assert weather["locations"][1]["cell_selection"] == "sea"
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        ({"model": "ecmwf_hres"}, "unknown weather model"),
+        ({"model": 5}, "unknown weather model"),
+        ({"forecast_days": 0}, "forecast_days must be"),
+        ({"forecast_days": 17}, "forecast_days must be"),
+        ({"forecast_days": "16"}, "forecast_days must be"),
+        ({"fields": []}, "fields must be a non-empty list"),
+        ({"fields": "temperature_2m"}, "fields must be a non-empty list"),
+        ({"fields": ["bogus"]}, "unknown weather field"),
+        ({"locations": []}, "locations must be a non-empty list"),
+        ({"locations": {}}, "locations must be a non-empty list"),
+    ],
+)
+def test_invalid_weather_source(tmp_path, overrides, message):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(weather_config(**overrides)))
+
+    with pytest.raises(ConfigError, match=message):
+        load_raw_config(file)
+
+
+def test_weather_location_missing_field(tmp_path):
+    data = weather_config()
+    del data["sources"]["weather"]["locations"][0]["latitude"]
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match="missing field: latitude"):
+        load_raw_config(file)
+
+
+@pytest.mark.parametrize(
+    "location, message",
+    [
+        (
+            {
+                "name": "dup",
+                "latitude": 52.0,
+                "longitude": 13.0,
+                "cell_selection": "land",
+            },
+            "duplicate weather location",
+        ),
+        (
+            {"name": 5, "latitude": 52.0, "longitude": 13.0, "cell_selection": "land"},
+            "name must be a string",
+        ),
+        (
+            {
+                "name": "x",
+                "latitude": 91.0,
+                "longitude": 13.0,
+                "cell_selection": "land",
+            },
+            "latitude must be within -90 and 90",
+        ),
+        (
+            {
+                "name": "x",
+                "latitude": 52.0,
+                "longitude": -181.0,
+                "cell_selection": "land",
+            },
+            "longitude must be within -180 and 180",
+        ),
+        (
+            {
+                "name": "x",
+                "latitude": "52.0",
+                "longitude": 13.0,
+                "cell_selection": "land",
+            },
+            "latitude must be a number",
+        ),
+        (
+            {"name": "x", "latitude": 52.0, "longitude": 13.0, "cell_selection": "air"},
+            "cell_selection must be land, sea or nearest",
+        ),
+    ],
+)
+def test_invalid_weather_location(tmp_path, location, message):
+    data = weather_config()
+    locations = data["sources"]["weather"]["locations"]
+    if location["name"] == "dup":
+        locations.append(dict(location, name=locations[0]["name"]))
+    else:
+        locations.append(location)
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match=message):
         load_raw_config(file)

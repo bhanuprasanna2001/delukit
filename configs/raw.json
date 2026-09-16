@@ -104,6 +104,8 @@
             ]
         },
         "weather": {
+            "model": "ecmwf_ifs",
+            "forecast_days": 16,
             "fields": [
                 "temperature_2m",
                 "wind_speed_100m",

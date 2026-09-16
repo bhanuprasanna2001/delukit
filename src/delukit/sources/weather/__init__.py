@@ -1,9 +1,17 @@
 """
-Open-Meteo — Weather input for forecast models.
+Weather — ECMWF IFS HRES forecasts from the Open-Meteo Single Runs API.
 
 Extract:
-    Weather by lat/lon (hourly), cell selection (land or sea):
-        1. Forecast (up to 16 days)
+    1. Forecast runs initialised 00:00 UTC, full 16-day horizon requested
+       (IFS issues 15 days of data; the trailing day is null and trimmed
+       in silver).
 
-Rate limit: Free non-commercial: 600/min, 5,000/hour, 10,000/day; commercial via customer API key.
+Locations are grouped by cell selection: land cities get land grid cells,
+offshore points get sea grid cells.
+
+Rate limit: 600 req/min (Open-Meteo free tier), 60 req/min applied.
 """
+
+from delukit.sources.weather.ecmwf import WeatherSource
+
+__all__ = ["WeatherSource"]
