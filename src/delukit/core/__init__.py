@@ -1,3 +1,3 @@
-from delukit.core.config import Config, ConfigError, load_config
+from delukit.core.config import ConfigError, RawConfig, load_raw_config
 
-__all__ = ["Config", "ConfigError", "load_config"]
+__all__ = ["ConfigError", "RawConfig", "load_raw_config"]

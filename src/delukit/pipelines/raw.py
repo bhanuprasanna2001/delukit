@@ -1,7 +1,7 @@
 """From APIs to Bronze."""
 
-from delukit.core.config import Config, load_config
+from delukit.core.config import RawConfig, load_raw_config
 
 
-def run(config_path: str) -> Config:
-    return load_config(config_path)
+def run(raw_config_path: str) -> RawConfig:
+    return load_raw_config(raw_config_path)

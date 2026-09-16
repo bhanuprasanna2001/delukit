@@ -13,7 +13,7 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
-class Config:
+class RawConfig:
     start: date | str
     end: date | str
     timezone: str
@@ -21,7 +21,7 @@ class Config:
     sources: dict[str, dict]
 
     @classmethod
-    def from_file(cls, path: str | Path) -> Config:
+    def from_file(cls, path: str | Path) -> RawConfig:
         raw = _read(path)
         data = _parse(raw, path)
         _validate(data)
@@ -102,5 +102,5 @@ def _validate(data: dict) -> None:
                 raise ConfigError(f"source {name} is missing field: {required}")
 
 
-def load_config(path: str | Path) -> Config:
-    return Config.from_file(path)
+def load_raw_config(path: str | Path) -> RawConfig:
+    return RawConfig.from_file(path)
