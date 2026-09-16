@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
+
+from tqdm import tqdm
 
 from delukit.layers.bronze.records import RECORD_COLUMNS
 
 # ponytail: fixed batch; raise it if payload sizes or counts grow
-_BATCH_SIZE = 100
+_BATCH_SIZE = 20
 
 
 class BronzeStore(ABC):
@@ -30,23 +33,35 @@ def land_records(
     records: list[dict],
     marker: str,
     table: str = "",
+    label: str = "",
+    colour: str | None = None,
     batch_size: int = _BATCH_SIZE,
 ) -> int:
     """Run DDL once, then land records in batched statements.
 
     Each batch is a single multi-row statement, which keeps round trips
     bounded instead of one per record (connector executemany is N
-    sequential requests).
+    sequential requests). Progress is shown on a tty only.
     """
     if not records:
         return 0
     with connection.cursor() as cursor:
         for statement in ddl:
             cursor.execute(statement)
-        for start in range(0, len(records), batch_size):
-            chunk = records[start : start + batch_size]
-            rows = ", ".join(_row(marker) for _ in chunk)
-            cursor.execute(sql.format(table=table, values=rows), _flat_values(chunk))
+        with tqdm(
+            total=len(records),
+            desc=label,
+            unit="rows",
+            colour=colour,
+            disable=not sys.stderr.isatty(),
+        ) as bar:
+            for start in range(0, len(records), batch_size):
+                chunk = records[start : start + batch_size]
+                rows = ", ".join(_row(marker) for _ in chunk)
+                cursor.execute(
+                    sql.format(table=table, values=rows), _flat_values(chunk)
+                )
+                bar.update(len(chunk))
     return len(records)
 
 

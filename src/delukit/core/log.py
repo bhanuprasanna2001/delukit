@@ -55,3 +55,6 @@ def setup_logging() -> None:
         )
     )
     logging.basicConfig(level=level, handlers=[handler], force=True)
+    # third-party HTTP chatter: keep warnings/errors, drop the per-request lines
+    for noisy in ("databricks.sql", "snowflake.connector", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

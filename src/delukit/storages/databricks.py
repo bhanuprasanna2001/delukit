@@ -65,6 +65,8 @@ class DatabricksStore(BronzeStore):
             records,
             marker="?",
             table=self.table,
+            label="databricks",
+            colour="blue",
         )
 
 

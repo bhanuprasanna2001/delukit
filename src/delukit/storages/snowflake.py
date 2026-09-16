@@ -63,6 +63,8 @@ class SnowflakeStore(BronzeStore):
             records,
             marker="%s",
             table=self.table,
+            label="snowflake",
+            colour="cyan",
         )
 
 
