@@ -41,6 +41,14 @@ _KNOWN_SOURCES = {
     "weather": ["fields", "locations"],
 }
 
+_ENTSOE_METHODS = {
+    "day_ahead_price",
+    "load_actual",
+    "load_forecast",
+    "generation_actual",
+    "generation_forecast",
+}
+
 
 def _read(path: str | Path) -> str:
     file = Path(path)
@@ -85,7 +93,9 @@ def _validate(data: dict) -> None:
         raise ConfigError("timezone must be a string")
 
     storages = data["storages"]
-    if not isinstance(storages, list) or not all(isinstance(item, str) for item in storages):
+    if not isinstance(storages, list) or not all(
+        isinstance(item, str) for item in storages
+    ):
         raise ConfigError("storages must be a list of strings")
 
     sources = data["sources"]
@@ -100,6 +110,45 @@ def _validate(data: dict) -> None:
         for required in _KNOWN_SOURCES[name]:
             if required not in source:
                 raise ConfigError(f"source {name} is missing field: {required}")
+        if name == "entsoe":
+            _validate_entsoe_methods(source["methods"])
+
+
+def _validate_entsoe_methods(methods: object) -> None:
+    if not isinstance(methods, list):
+        raise ConfigError("entsoe methods must be a list")
+    for entry in methods:
+        if not isinstance(entry, dict) or not isinstance(entry.get("method"), str):
+            raise ConfigError(
+                "entsoe method entries must be objects with a method field"
+            )
+        method = entry["method"]
+        if method not in _ENTSOE_METHODS:
+            raise ConfigError(f"unknown entsoe method: {method}")
+        if not isinstance(entry.get("area"), str):
+            raise ConfigError(f"entsoe method {method} is missing field: area")
+        if (
+            method in ("generation_actual", "generation_forecast")
+            and "psr_types" not in entry
+        ):
+            raise ConfigError(f"entsoe method {method} is missing field: psr_types")
+        if "sequences" in entry:
+            sequences = entry["sequences"]
+            valid = isinstance(sequences, list) and all(
+                isinstance(s, int) and s in (1, 2) for s in sequences
+            )
+            if not valid:
+                raise ConfigError(
+                    f"entsoe method {method} sequences must be a list of 1 and/or 2"
+                )
+        if "psr_types" in entry:
+            psr_types = entry["psr_types"]
+            if not isinstance(psr_types, list) or not all(
+                isinstance(p, str) for p in psr_types
+            ):
+                raise ConfigError(
+                    f"entsoe method {method} psr_types must be a list of strings"
+                )
 
 
 def load_raw_config(path: str | Path) -> RawConfig:

@@ -85,3 +85,76 @@ def test_raw_run_uses_raw_config(tmp_path):
 
     assert isinstance(config, RawConfig)
     assert config.sources["smard"]["resolution"] == "15min"
+
+
+ENTSOE_VALID = {
+    "start": "2025-10-01",
+    "end": "latest",
+    "timezone": "Europe/Berlin",
+    "storages": ["local"],
+    "sources": {
+        "entsoe": {
+            "methods": [
+                {"area": "DE_LU", "method": "day_ahead_price", "sequences": [1, 2]},
+                {"area": "DE_LU", "method": "load_actual"},
+                {
+                    "area": "DE_LU",
+                    "method": "generation_actual",
+                    "psr_types": ["B16", "B18"],
+                },
+            ]
+        }
+    },
+}
+
+
+def entsoe_config(methods):
+    data = json.loads(json.dumps(ENTSOE_VALID))
+    data["sources"]["entsoe"]["methods"] = methods
+    return data
+
+
+def test_valid_entsoe_methods(tmp_path):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(ENTSOE_VALID))
+
+    config = load_raw_config(file)
+
+    assert config.sources["entsoe"]["methods"][0]["sequences"] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    "methods, message",
+    [
+        ([{"area": "DE_LU", "method": "bogus"}], "unknown entsoe method"),
+        ([{"method": "load_actual"}], "missing field: area"),
+        (
+            [{"area": "DE_LU", "method": "generation_actual"}],
+            "missing field: psr_types",
+        ),
+        (
+            [{"area": "DE_LU", "method": "generation_forecast"}],
+            "missing field: psr_types",
+        ),
+        (
+            [{"area": "DE_LU", "method": "day_ahead_price", "sequences": [3]}],
+            "sequences must be",
+        ),
+        (
+            [{"area": "DE_LU", "method": "day_ahead_price", "sequences": "12"}],
+            "sequences must be",
+        ),
+        (
+            [{"area": "DE_LU", "method": "generation_actual", "psr_types": "B16"}],
+            "psr_types must be",
+        ),
+        ("not a list", "methods must be a list"),
+        ([{"method": 5}], "method field"),
+    ],
+)
+def test_invalid_entsoe_methods(tmp_path, methods, message):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(entsoe_config(methods)))
+
+    with pytest.raises(ConfigError, match=message):
+        load_raw_config(file)

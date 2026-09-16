@@ -14,3 +14,7 @@ Extract:
 
 Rate limit: 400 req/min per token, token required.
 """
+
+from delukit.sources.entsoe.source import EntsoeSource
+
+__all__ = ["EntsoeSource"]
