@@ -52,6 +52,10 @@ class DataSource(ABC):
         the source has no data for that day. Progress is shown on a tty
         only.
         """
+        if start > end:
+            raise ValueError(
+                f"start {start.isoformat()} is after end {end.isoformat()}"
+            )
         method = params.get("method", "")
         results: dict[date, Any] = {}
         day = start
