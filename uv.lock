@@ -187,7 +187,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "entsoe-py" },
+    { name = "pandas" },
     { name = "pyrate-limiter" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -200,7 +202,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "entsoe-py", specifier = ">=0.8.1" },
+    { name = "pandas", specifier = ">=3.0.5" },
     { name = "pyrate-limiter", specifier = ">=4.5.0" },
+    { name = "requests", specifier = ">=2.34.2" },
 ]
 
 [package.metadata.requires-dev]

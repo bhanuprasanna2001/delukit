@@ -24,6 +24,15 @@
                 {
                     "method": "generation_actual",
                     "generation_types": [
+                        "biomass",
+                        "gas",
+                        "hard_coal",
+                        "hydro",
+                        "lignite",
+                        "nuclear",
+                        "other_conventional",
+                        "other_renewables",
+                        "pumped_storage",
                         "solar",
                         "wind_offshore",
                         "wind_onshore"
@@ -31,14 +40,6 @@
                 },
                 {
                     "method": "generation_forecast_day_ahead",
-                    "generation_types": [
-                        "solar",
-                        "wind_offshore",
-                        "wind_onshore"
-                    ]
-                },
-                {
-                    "method": "generation_forecast_intraday",
                     "generation_types": [
                         "solar",
                         "wind_offshore",

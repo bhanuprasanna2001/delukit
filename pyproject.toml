@@ -9,7 +9,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "entsoe-py>=0.8.1",
+    "pandas>=3.0.5",
     "pyrate-limiter>=4.5.0",
+    "requests>=2.34.2",
 ]
 
 [project.scripts]

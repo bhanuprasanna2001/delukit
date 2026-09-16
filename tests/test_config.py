@@ -12,7 +12,15 @@ VALID = {
     "timezone": "Europe/Berlin",
     "storages": ["local"],
     "sources": {
-        "smard": {"area": "DE_LU", "resolution": "15min"},
+        "smard": {
+            "area": "DE_LU",
+            "resolution": "15min",
+            "methods": [
+                {"method": "day_ahead_price"},
+                {"method": "load_actual"},
+                {"method": "generation_actual", "generation_types": ["solar"]},
+            ],
+        },
         "weather": {"fields": ["temperature_2m"], "locations": []},
     },
 }
@@ -205,4 +213,108 @@ def test_invalid_entsoe_methods(tmp_path, methods, message):
     file.write_text(json.dumps(entsoe_config(methods)))
 
     with pytest.raises(ConfigError, match=message):
+        load_raw_config(file)
+
+
+SMARD_VALID = {
+    "start": "2025-10-01",
+    "end": "latest",
+    "timezone": "Europe/Berlin",
+    "storages": ["local"],
+    "sources": {
+        "smard": {
+            "area": "DE_LU",
+            "resolution": "15min",
+            "methods": [
+                {"method": "day_ahead_price"},
+                {"method": "load_actual"},
+                {"method": "load_forecast"},
+                {
+                    "method": "generation_actual",
+                    "generation_types": ["solar", "wind_offshore", "wind_onshore"],
+                },
+                {
+                    "method": "generation_forecast_day_ahead",
+                    "generation_types": ["solar", "wind_offshore", "wind_onshore"],
+                },
+            ],
+        }
+    },
+}
+
+
+def smard_config(methods=None, resolution="15min", area="DE_LU"):
+    data = json.loads(json.dumps(SMARD_VALID))
+    source = data["sources"]["smard"]
+    if methods is not None:
+        source["methods"] = methods
+    source["resolution"] = resolution
+    source["area"] = area
+    return data
+
+
+def test_valid_smard_methods(tmp_path):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(SMARD_VALID))
+
+    config = load_raw_config(file)
+
+    methods = config.sources["smard"]["methods"]
+    assert methods[3]["generation_types"] == ["solar", "wind_offshore", "wind_onshore"]
+
+
+@pytest.mark.parametrize(
+    "methods, message",
+    [
+        ([{"method": "bogus"}], "unknown smard method"),
+        ([{"method": "generation_actual"}], "generation_types must be"),
+        (
+            [{"method": "generation_actual", "generation_types": []}],
+            "generation_types must be",
+        ),
+        (
+            [{"method": "generation_actual", "generation_types": "solar"}],
+            "generation_types must be",
+        ),
+        (
+            [{"method": "generation_actual", "generation_types": [1]}],
+            "generation_types must be",
+        ),
+        ([{"method": "generation_forecast_day_ahead"}], "generation_types must be"),
+        ("not a list", "methods must be a list"),
+        ([{"method": 5}], "method field"),
+    ],
+)
+def test_invalid_smard_methods(tmp_path, methods, message):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(smard_config(methods=methods)))
+
+    with pytest.raises(ConfigError, match=message):
+        load_raw_config(file)
+
+
+@pytest.mark.parametrize("resolution", ["5min", [], {"value": "15min"}, 15])
+def test_invalid_smard_resolution(tmp_path, resolution):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(smard_config(resolution=resolution)))
+
+    with pytest.raises(ConfigError, match="resolution must be 15min or hour"):
+        load_raw_config(file)
+
+
+def test_smard_missing_methods_field(tmp_path):
+    data = json.loads(json.dumps(SMARD_VALID))
+    del data["sources"]["smard"]["methods"]
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(data))
+
+    with pytest.raises(ConfigError, match="smard is missing field: methods"):
+        load_raw_config(file)
+
+
+def test_invalid_smard_area(tmp_path):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(smard_config(area=5)))
+
+    with pytest.raises(ConfigError, match="smard area must be a string"):
         load_raw_config(file)

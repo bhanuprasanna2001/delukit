@@ -35,10 +35,25 @@ class RawConfig:
 
 
 _KNOWN_SOURCES = {
-    "smard": ["area", "resolution"],
+    "smard": ["area", "resolution", "methods"],
     "entsoe": ["methods"],
     "energy_charts": ["methods"],
     "weather": ["fields", "locations"],
+}
+
+_SMARD_RESOLUTIONS = {"15min", "hour"}
+
+_SMARD_METHODS = {
+    "day_ahead_price",
+    "load_actual",
+    "load_forecast",
+    "generation_actual",
+    "generation_forecast_day_ahead",
+}
+
+_SMARD_GENERATION_METHODS = {
+    "generation_actual",
+    "generation_forecast_day_ahead",
 }
 
 _ENTSOE_METHODS = {
@@ -116,6 +131,8 @@ def _validate(data: dict) -> None:
             _validate_entsoe_methods(source["methods"])
         if name == "energy_charts":
             _validate_energy_charts_methods(source["methods"])
+        if name == "smard":
+            _validate_smard(source)
 
 
 def _validate_entsoe_methods(methods: object) -> None:
@@ -170,6 +187,42 @@ def _validate_energy_charts_methods(methods: object) -> None:
             raise ConfigError(
                 f"energy_charts method {method} is missing field: bidding_zone"
             )
+
+
+def _validate_smard(source: object) -> None:
+    if not isinstance(source, dict):
+        raise ConfigError("source must be an object: smard")
+    if not isinstance(source.get("area"), str):
+        raise ConfigError("smard area must be a string")
+    resolution = source.get("resolution")
+    if not isinstance(resolution, str) or resolution not in _SMARD_RESOLUTIONS:
+        raise ConfigError("smard resolution must be 15min or hour")
+    _validate_smard_methods(source.get("methods"))
+
+
+def _validate_smard_methods(methods: object) -> None:
+    if not isinstance(methods, list):
+        raise ConfigError("smard methods must be a list")
+    for entry in methods:
+        if not isinstance(entry, dict) or not isinstance(entry.get("method"), str):
+            raise ConfigError(
+                "smard method entries must be objects with a method field"
+            )
+        method = entry["method"]
+        if method not in _SMARD_METHODS:
+            raise ConfigError(f"unknown smard method: {method}")
+        if method in _SMARD_GENERATION_METHODS:
+            generation_types = entry.get("generation_types")
+            valid = (
+                isinstance(generation_types, list)
+                and generation_types
+                and all(isinstance(item, str) for item in generation_types)
+            )
+            if not valid:
+                raise ConfigError(
+                    f"smard method {method} generation_types must be "
+                    "a non-empty list of strings"
+                )
 
 
 def load_raw_config(path: str | Path) -> RawConfig:
