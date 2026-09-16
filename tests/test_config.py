@@ -87,6 +87,54 @@ def test_raw_run_uses_raw_config(tmp_path):
     assert config.sources["smard"]["resolution"] == "15min"
 
 
+ENERGY_CHARTS_VALID = {
+    "start": "2025-10-01",
+    "end": "latest",
+    "timezone": "Europe/Berlin",
+    "storages": ["local"],
+    "sources": {
+        "energy_charts": {
+            "methods": [{"bidding_zone": "DE-LU", "method": "day_ahead_price"}]
+        }
+    },
+}
+
+
+def test_valid_energy_charts_methods(tmp_path):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(ENERGY_CHARTS_VALID))
+
+    config = load_raw_config(file)
+
+    assert config.sources["energy_charts"]["methods"][0]["bidding_zone"] == "DE-LU"
+
+
+def energy_charts_config(methods):
+    data = json.loads(json.dumps(ENERGY_CHARTS_VALID))
+    data["sources"]["energy_charts"]["methods"] = methods
+    return data
+
+
+@pytest.mark.parametrize(
+    "methods, message",
+    [
+        (
+            [{"bidding_zone": "DE-LU", "method": "bogus"}],
+            "unknown energy_charts method",
+        ),
+        ([{"method": "day_ahead_price"}], "missing field: bidding_zone"),
+        ("not a list", "methods must be a list"),
+        ([{"method": 5}], "method field"),
+    ],
+)
+def test_invalid_energy_charts_methods(tmp_path, methods, message):
+    file = tmp_path / "raw.json"
+    file.write_text(json.dumps(energy_charts_config(methods)))
+
+    with pytest.raises(ConfigError, match=message):
+        load_raw_config(file)
+
+
 ENTSOE_VALID = {
     "start": "2025-10-01",
     "end": "latest",

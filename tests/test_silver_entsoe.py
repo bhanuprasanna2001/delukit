@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from delukit.layers.silver.entsoe import parse_day
+from delukit.layers.silver.parsers.entsoe import parse_day
 
 TZ = "Europe/Berlin"
 

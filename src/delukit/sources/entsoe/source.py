@@ -6,7 +6,7 @@ Each day returns raw XML documents keyed by call key:
     generation_actual/B16  ...   (one doc per requested psr type)
     generation_forecast            (one doc covering all wind/solar types)
 
-Parsing is the silver layer's job (delukit.layers.silver.entsoe).
+Parsing is the silver layer's job (delukit.layers.silver.parsers.entsoe).
 """
 
 from __future__ import annotations

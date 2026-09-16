@@ -49,6 +49,8 @@ _ENTSOE_METHODS = {
     "generation_forecast",
 }
 
+_ENERGY_CHARTS_METHODS = {"day_ahead_price"}
+
 
 def _read(path: str | Path) -> str:
     file = Path(path)
@@ -112,6 +114,8 @@ def _validate(data: dict) -> None:
                 raise ConfigError(f"source {name} is missing field: {required}")
         if name == "entsoe":
             _validate_entsoe_methods(source["methods"])
+        if name == "energy_charts":
+            _validate_energy_charts_methods(source["methods"])
 
 
 def _validate_entsoe_methods(methods: object) -> None:
@@ -149,6 +153,23 @@ def _validate_entsoe_methods(methods: object) -> None:
                 raise ConfigError(
                     f"entsoe method {method} psr_types must be a list of strings"
                 )
+
+
+def _validate_energy_charts_methods(methods: object) -> None:
+    if not isinstance(methods, list):
+        raise ConfigError("energy_charts methods must be a list")
+    for entry in methods:
+        if not isinstance(entry, dict) or not isinstance(entry.get("method"), str):
+            raise ConfigError(
+                "energy_charts method entries must be objects with a method field"
+            )
+        method = entry["method"]
+        if method not in _ENERGY_CHARTS_METHODS:
+            raise ConfigError(f"unknown energy_charts method: {method}")
+        if not isinstance(entry.get("bidding_zone"), str):
+            raise ConfigError(
+                f"energy_charts method {method} is missing field: bidding_zone"
+            )
 
 
 def load_raw_config(path: str | Path) -> RawConfig:
