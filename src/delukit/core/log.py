@@ -1,9 +1,16 @@
-"""Colored console logging for the CLI.
+"""Colored tree-styled console logging for the CLI.
 
-Level names are tinted per level (debug dim, info cyan, warning yellow,
-error red). Logs go to stderr so stdout stays clean; the level is
-configurable via the DELUKIT_LOG_LEVEL environment variable (default
-INFO).
+Each line reads like:
+
+    21:08:37 [INFO] ── run start · sources=entsoe, smard · window=2026-09-09..2026-09-16
+    21:09:10 [INFO] ── smard: 3285 records
+    21:09:11 [INFO] │  ├─ local: 3285 rows
+    21:09:11 [INFO] │  ├─ databricks: 3285 rows
+
+Level tags are tinted per level and nested lines get tree connectors
+(the `indent` record attribute controls depth). Logs go to stderr so
+stdout stays clean; the level is configurable via the
+DELUKIT_LOG_LEVEL environment variable (default INFO).
 """
 
 from __future__ import annotations
@@ -23,12 +30,17 @@ _RESET = "\033[0m"
 
 
 class ColoredFormatter(logging.Formatter):
-    """Standard formatter that tints the level name."""
+    """Standard formatter with level tags and tree-style indentation."""
 
     def format(self, record: logging.LogRecord) -> str:
+        indent = getattr(record, "indent", 0)
         color = _LEVEL_COLORS.get(record.levelno)
-        if color is not None:
-            record.levelname = f"{color}{record.levelname}{_RESET}"
+        record.leveltag = (
+            f"{color}[{record.levelname}]{_RESET}" if color else f"[{record.levelname}]"
+        )
+        record.tree = "│  " * indent + ("├─ " if indent else "── ")
+        if record.levelno == logging.DEBUG:
+            record.msg = f"\033[2m{record.msg}{_RESET}"
         return super().format(record)
 
 
@@ -39,7 +51,7 @@ def setup_logging() -> None:
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(
         ColoredFormatter(
-            "%(asctime)s %(levelname)s %(name)s · %(message)s", datefmt="%H:%M:%S"
+            "%(asctime)s %(leveltag)s %(tree)s%(message)s", datefmt="%H:%M:%S"
         )
     )
     logging.basicConfig(level=level, handlers=[handler], force=True)

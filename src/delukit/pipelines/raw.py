@@ -84,9 +84,9 @@ def run(raw_config_path: str) -> RawConfig:
         for store_name, store in stores.items():
             try:
                 written = store.write(records)
-                log.info("  -> %s: %d rows", store_name, written)
+                log.info("%s: %d rows", store_name, written, extra={"indent": 1})
             except Exception as error:  # noqa: BLE001 — a down store must not block the rest
-                log.error("%s -> %s failed: %s", name, store_name, error)
+                log.error("%s failed: %s", store_name, error, extra={"indent": 1})
                 failures.append(f"{name} -> {store_name}: {error}")
     if failures:
         log.error("run failed: %s", "; ".join(failures))
@@ -147,7 +147,7 @@ def _fetch_source(
             if key not in ("method", "fetch_policy")
         }
         kwargs = {} if name == "weather" else {**common, "method": method, **params}
-        log.debug("%s.%s: fetching", name, method)
+        log.debug("%s: fetching", method, extra={"indent": 1})
         raws = source.fetch(start, end, **kwargs)
         records.extend(make_records(name, raws, fetched_at))
     return records
