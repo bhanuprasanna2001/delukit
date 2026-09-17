@@ -116,6 +116,50 @@ class TestDatabricksStore:
         assert store.write([]) == 0
         assert store.connection.cursor_.calls == []
 
+    def test_huge_payloads_land_one_row_per_batch(self):
+        connection = FakeConnection()
+        store = DatabricksStore(connection=connection)
+        big = '{"series": [[1, "' + "x" * 460_000 + '"]]}'
+        rows = [record(payload=big, key=f"forecast_{i}") for i in range(3)]
+
+        assert store.write(rows) == 3
+
+        merges = [
+            call for call in connection.cursor_.calls if call[0].startswith("\nMERGE")
+        ]
+        assert [len(params) // 6 for _, params in merges] == [1, 1, 1]
+        for _, params in merges:
+            size = sum(len(v) if isinstance(v, str) else 16 for v in params)
+            assert size < 1_048_576
+
+    def test_batches_split_on_bytes_before_row_count(self):
+        connection = FakeConnection()
+        store = DatabricksStore(connection=connection)
+        rows = [record(key=f"key_{i}") for i in range(20)]
+        rows.append(
+            record(payload='{"series": [[1, "' + "x" * 460_000 + '"]]}', key="forecast")
+        )
+
+        assert store.write(rows) == 21
+
+        merges = [
+            call for call in connection.cursor_.calls if call[0].startswith("\nMERGE")
+        ]
+        assert [len(params) // 6 for _, params in merges] == [20, 1]
+
+    def test_single_row_over_cap_still_lands(self):
+        connection = FakeConnection()
+        store = DatabricksStore(connection=connection)
+        rows = [record(payload='{"series": [[1, "' + "x" * 900_000 + '"]]}')]
+
+        assert store.write(rows) == 1
+
+        merges = [
+            call for call in connection.cursor_.calls if call[0].startswith("\nMERGE")
+        ]
+        assert len(merges) == 1
+        assert merges[0][1] == values(rows)
+
     def test_missing_env_raises(self, monkeypatch):
         for name in (
             "DATABRICKS_SERVER_HOSTNAME",

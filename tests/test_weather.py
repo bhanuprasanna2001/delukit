@@ -75,7 +75,9 @@ class FakeSession:
 
 def source(responses):
     session = FakeSession(responses)
-    return WeatherSource(LOCATIONS, FIELDS, session=session, tz=TZ), session
+    src = WeatherSource(LOCATIONS, FIELDS, session=session, tz=TZ)
+    src.limiter = None  # tests must not wait on the real 10/min limit
+    return src, session
 
 
 DAY = date(2025, 10, 1)
@@ -156,7 +158,8 @@ def test_non_json_4xx_raises():
         src.fetch(DAY, DAY)
 
 
-def test_transient_failure_is_retried():
+def test_transient_failure_is_retried(monkeypatch):
+    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
     session = FakeSession(
         [
             FakeResponse(status=500),
@@ -165,6 +168,7 @@ def test_transient_failure_is_retried():
         ]
     )
     src = WeatherSource(LOCATIONS[:1], FIELDS, session=session, tz=TZ)
+    src.limiter = None
 
     results = src.fetch(DAY, DAY)
 
@@ -172,7 +176,8 @@ def test_transient_failure_is_retried():
     assert set(results[DAY]["forecast"]["locations"]) == {"berlin"}
 
 
-def test_transient_failure_exhausts_retries():
+def test_transient_failure_exhausts_retries(monkeypatch):
+    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
     src, _ = source([FakeResponse(status=500)] * 3)
 
     with pytest.raises(TransientSourceError, match="after 3 attempts"):
@@ -202,3 +207,54 @@ def test_mismatched_item_count_raises():
 
     with pytest.raises(ValueError, match="zip"):
         src.fetch(DAY, DAY)
+
+
+RATE_LIMITED = "Minutely API request limit exceeded. Please try again in one minute."
+
+
+def test_rate_limit_json_is_retried(monkeypatch):
+    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
+    src, session = source(
+        [
+            FakeResponse(status=429, reason=RATE_LIMITED),
+            FakeResponse(payload=[item(), item(53.55)]),
+            FakeResponse(payload=[item(54.75)]),
+        ]
+    )
+
+    results = src.fetch(DAY, DAY)
+
+    assert len(session.calls) == 3
+    assert set(results[DAY]["forecast"]["locations"]) == {
+        "berlin",
+        "hamburg",
+        "north_sea_west",
+    }
+
+
+def test_rate_limit_json_exhausts_retries(monkeypatch):
+    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
+    src, session = source([FakeResponse(status=429, reason=RATE_LIMITED)] * 3)
+
+    with pytest.raises(TransientSourceError, match="HTTP 429"):
+        src.fetch(DAY, DAY)
+
+    assert len(session.calls) == 3
+
+
+def test_rate_limit_backoff_waits_a_minute(monkeypatch):
+    slept = []
+    monkeypatch.setattr("delukit.sources.data_source.sleep", slept.append)
+    src, _ = source([FakeResponse(status=429, reason=RATE_LIMITED)] * 3)
+
+    with pytest.raises(TransientSourceError):
+        src.fetch(DAY, DAY)
+
+    assert slept == [60.0, 60.0]
+
+
+def test_limiter_is_10_per_minute():
+    rate = WeatherSource.limiter.buckets()[0].rates[0]
+
+    assert rate.limit == 10
+    assert rate.interval == 60_000

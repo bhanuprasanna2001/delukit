@@ -124,9 +124,12 @@ class DataSource(ABC):
 
     @staticmethod
     def _backoff(attempt: int, error: requests.RequestException) -> float:
-        # ponytail: fixed small backoff; add jitter if many concurrent retries matter
         if isinstance(error, requests.HTTPError) and error.response is not None:
             retry_after = error.response.headers.get("Retry-After")
             if retry_after is not None and retry_after.isdigit():
                 return float(retry_after)
+            if error.response.status_code == 429:
+                # ponytail: minutely window resets each minute and Retry-After
+                # is often absent; 2s retries just burn the budget
+                return 60.0
         return float(2**attempt)

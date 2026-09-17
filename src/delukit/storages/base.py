@@ -9,8 +9,11 @@ from tqdm import tqdm
 
 from delukit.layers.bronze.records import RECORD_COLUMNS
 
-# ponytail: fixed batch; raise it if payload sizes or counts grow
+# ponytail: row cap + byte cap; a batch flushes on whichever hits first.
+# 800k chars sits under Databricks' 1M parameterized-query limit with room
+# for connector overhead — a single weather row (~490k) always fits alone.
 _BATCH_SIZE = 20
+_MAX_PARAMS_CHARS = 800_000
 
 
 class BronzeStore(ABC):
@@ -41,7 +44,10 @@ def land_records(
 
     Each batch is a single multi-row statement, which keeps round trips
     bounded instead of one per record (connector executemany is N
-    sequential requests). Progress is shown on a tty only.
+    sequential requests). Batches split on row count or estimated
+    parameter size, whichever hits first, so giant payloads (weather)
+    land one row per statement while small rows still batch up.
+    Progress is shown on a tty only.
     """
     if not records:
         return 0
@@ -55,14 +61,34 @@ def land_records(
             colour=colour,
             disable=not sys.stderr.isatty(),
         ) as bar:
-            for start in range(0, len(records), batch_size):
-                chunk = records[start : start + batch_size]
+            for chunk in _batches(records, batch_size):
                 rows = ", ".join(_row(marker) for _ in chunk)
                 cursor.execute(
                     sql.format(table=table, values=rows), _flat_values(chunk)
                 )
                 bar.update(len(chunk))
     return len(records)
+
+
+def _batches(records: list[dict], batch_size: int):
+    """Yield chunks of at most batch_size rows or _MAX_PARAMS_CHARS."""
+    batch, size = [], 0
+    for record in records:
+        need = _params_size(record)
+        if batch and (len(batch) >= batch_size or size + need > _MAX_PARAMS_CHARS):
+            yield batch
+            batch, size = [], 0
+        batch.append(record)
+        size += need
+    if batch:
+        yield batch
+
+
+def _params_size(record: dict) -> int:
+    return sum(
+        len(value) if isinstance(value, str) else 16
+        for value in (_flat_values([record]))
+    )
 
 
 def _row(marker: str) -> str:

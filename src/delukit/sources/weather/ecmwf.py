@@ -24,7 +24,7 @@ from datetime import date
 import requests
 from pyrate_limiter import Duration, Limiter, Rate
 
-from delukit.sources.data_source import DataSource, SourceError
+from delukit.sources.data_source import TRANSIENT_STATUSES, DataSource, SourceError
 
 _URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 
@@ -32,7 +32,10 @@ _URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 class WeatherSource(DataSource):
     name = "weather"
     colour = "yellow"
-    limiter = Limiter(Rate(60, Duration.MINUTE))
+    # ponytail: 10 raw HTTP/min ≈ ~140 weighted calls/min — Open-Meteo
+    # weights each request by locations × horizon (20 land locs × 16d ≈ 23
+    # calls); a 60/min burst tripped the 600 weighted/min free-tier limit
+    limiter = Limiter(Rate(10, Duration.MINUTE))
     max_retries = 3
 
     def __init__(
@@ -93,8 +96,19 @@ class WeatherSource(DataSource):
                 reason = data.get("reason", "")
                 if "run is not available" in reason:
                     return None
-                if response.status_code < 500:
-                    raise SourceError(f"{self.name}: {reason}")
+                if (
+                    response.status_code in TRANSIENT_STATUSES
+                    or response.status_code >= 500
+                ):
+                    response.raise_for_status()
+                lowered = reason.lower()
+                if "limit exceeded" in lowered or "too many" in lowered:
+                    # ponytail: rate limit as 2xx + error body; synthesize 429
+                    # so _call retries with a 60s backoff instead of failing
+                    limited = requests.Response()
+                    limited.status_code = 429
+                    raise requests.HTTPError(f"429 {reason}", response=limited)
+                raise SourceError(f"{self.name}: {reason}")
             response.raise_for_status()
             return data
 
