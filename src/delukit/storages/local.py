@@ -51,3 +51,40 @@ class LocalStore(BronzeStore):
             return set()
         frame = pd.read_parquet(self.file, columns=["source", "day"])
         return {(row.source, row.day.date()) for row in frame.itertuples()}
+
+    def identities(self) -> set[tuple[str, date, str, str]]:
+        """Stored (source, day, key, payload_hash) identities."""
+        if not self.file.is_file():
+            return set()
+        frame = pd.read_parquet(
+            self.file, columns=["source", "day", "key", "payload_hash"]
+        )
+        return {
+            (row.source, row.day.date(), row.key, row.payload_hash)
+            for row in frame.itertuples()
+        }
+
+    def records_for(self, wanted: set[tuple[str, date, str, str]]) -> list[dict]:
+        """Full records for the given identities, oldest day first."""
+        if not wanted or not self.file.is_file():
+            return []
+        frame = pd.read_parquet(self.file)
+        rows: list[dict] = []
+        for row in frame.itertuples():
+            ident = (row.source, row.day.date(), row.key, row.payload_hash)
+            if ident not in wanted:
+                continue
+            rows.append(
+                {
+                    "source": row.source,
+                    "day": row.day.date(),
+                    "key": row.key,
+                    "payload": row.payload,
+                    "payload_hash": row.payload_hash,
+                    "fetched_at": row.fetched_at.to_pydatetime()
+                    if hasattr(row.fetched_at, "to_pydatetime")
+                    else row.fetched_at,
+                }
+            )
+        rows.sort(key=lambda r: (r["source"], r["day"], r["key"], r["payload_hash"]))
+        return rows

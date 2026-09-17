@@ -63,6 +63,7 @@ class FakeStore:
         self.error = error
         self._coverage = set(coverage or set())
         self.coverage_calls = 0
+        self.identities_calls = 0
 
     def write(self, records):
         if self.error is not None:
@@ -73,6 +74,16 @@ class FakeStore:
     def coverage(self):
         self.coverage_calls += 1
         return set(self._coverage)
+
+    def identities(self):
+        self.identities_calls += 1
+        if self.error is not None:
+            raise self.error
+        return {
+            (r["source"], r["day"], r["key"], r["payload_hash"])
+            for batch in self.written
+            for r in batch
+        }
 
 
 def write_config(tmp_path, **overrides):
@@ -317,3 +328,63 @@ def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
 
     assert databricks.coverage_calls == 0
     assert smard.calls[0][0] == TODAY - timedelta(days=7)
+
+
+def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
+    from delukit.pipelines.raw import sync
+
+    path = write_config(tmp_path, storages=["local", "databricks"])
+    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
+    local = LocalStore(tmp_path / "store")
+    databricks = FakeStore(error=RuntimeError("connection refused"))
+    patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
+
+    with pytest.raises(PipelineError, match="databricks"):
+        run(str(path))
+    assert len(pd.read_parquet(local.file)) == 1
+    assert databricks.written == []
+
+    databricks.error = None
+    sync(str(path))
+
+    assert len(databricks.written) == 1 and len(databricks.written[0]) == 1
+    sync(str(path))  # idempotent: nothing new to relay
+    assert len(databricks.written) == 1
+
+
+def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
+    from delukit.pipelines.raw import sync
+
+    path = write_config(tmp_path, storages=["local", "databricks"])
+    old = TODAY - timedelta(days=30)
+    local = LocalStore(tmp_path / "store")
+    seed(local, "smard", old)
+    databricks = FakeStore()
+    patch(
+        monkeypatch,
+        {"smard": FakeSource(raws={})},
+        {"local": local, "databricks": databricks},
+    )
+
+    sync(str(path))
+
+    assert len(databricks.written) == 1
+    assert databricks.written[0][0]["day"] == old
+
+
+def test_revised_payload_syncs_new_version_only(monkeypatch, tmp_path):
+    from delukit.pipelines.raw import sync
+
+    path = write_config(tmp_path, storages=["local", "databricks"])
+    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
+    local = LocalStore(tmp_path / "store")
+    databricks = FakeStore()
+    patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
+    run(str(path))
+    assert len(databricks.written) == 1
+
+    seed(local, "smard", TODAY, payload='{"series": [[1, 99.0]]}')
+    sync(str(path))
+
+    assert len(databricks.written) == 2 and len(databricks.written[1]) == 1
+    assert databricks.written[1][0]["payload"] == '{"series": [[1, 99.0]]}'

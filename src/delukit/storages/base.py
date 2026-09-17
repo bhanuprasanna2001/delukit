@@ -33,6 +33,10 @@ class BronzeStore(ABC):
     def coverage(self) -> set[tuple[str, date]]:
         """Stored (source, day) pairs; days normalized to date objects."""
 
+    @abstractmethod
+    def identities(self) -> set[tuple[str, date, str, str]]:
+        """Stored (source, day, key, payload_hash) identities."""
+
 
 def land_records(
     connection,

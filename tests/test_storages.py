@@ -331,3 +331,52 @@ class TestCoverageHelpers:
         assert is_missing_table(Exception("does not exist"))
         assert is_missing_table(Exception("TABLE_OR_VIEW_NOT_FOUND"))
         assert not is_missing_table(RuntimeError("connection refused"))
+
+
+class TestIdentities:
+    def test_local_identities_and_records_for(self, tmp_path):
+        from delukit.storages.local import LocalStore
+
+        store = LocalStore(tmp_path)
+        assert store.identities() == set()
+        assert store.records_for({("smard", DAY, "k", "h")}) == []
+        rows = [record(), record(day=date(2026, 9, 16))]
+        store.write(rows)
+
+        idents = store.identities()
+        assert len(idents) == 2
+        assert all(len(ident) == 4 for ident in idents)
+
+        replay = store.records_for(idents)
+        assert len(replay) == 2
+        assert replay[0]["day"] == DAY
+        assert isinstance(replay[0]["fetched_at"], datetime)
+        assert store.records_for(set()) == []
+
+    def test_databricks_identities(self):
+        rows = [
+            ("smard", DAY, "day_ahead_price", "abc"),
+            ("smard", "2026-09-16", "day_ahead_price", "def"),
+        ]
+        store = DatabricksStore(connection=FakeConnection(rows=rows))
+
+        assert store.identities() == {
+            ("smard", DAY, "day_ahead_price", "abc"),
+            ("smard", date(2026, 9, 16), "day_ahead_price", "def"),
+        }
+
+    def test_snowflake_identities(self):
+        rows = [(("smard", DAY, "day_ahead_price", "abc"))]
+        store = SnowflakeStore(connection=FakeConnection(rows=[rows[0]]))
+
+        assert store.identities() == {("smard", DAY, "day_ahead_price", "abc")}
+
+    def test_identities_missing_table_returns_empty(self):
+        error = Exception("TABLE_OR_VIEW_NOT_FOUND: delukit.bronze.payloads")
+        assert (
+            DatabricksStore(connection=FakeConnection(error=error)).identities()
+            == set()
+        )
+        assert (
+            SnowflakeStore(connection=FakeConnection(error=error)).identities() == set()
+        )

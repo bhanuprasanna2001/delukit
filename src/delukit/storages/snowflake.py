@@ -84,6 +84,23 @@ class SnowflakeStore(BronzeStore):
             raise
         return {(source, normalize_day(day)) for source, day in rows}
 
+    def identities(self) -> set[tuple[str, date, str, str]]:
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    f'SELECT DISTINCT SOURCE, DAY, "KEY", PAYLOAD_HASH'
+                    f" FROM {self.table}"
+                )
+                rows = cursor.fetchall()
+        except Exception as error:
+            if is_missing_table(error):
+                return set()
+            raise
+        return {
+            (source, normalize_day(day), key, payload_hash)
+            for source, day, key, payload_hash in rows
+        }
+
 
 def _connect_params() -> dict:
     params = {

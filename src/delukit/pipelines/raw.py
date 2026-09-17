@@ -1,12 +1,18 @@
 """From APIs to Bronze.
 
 Daily run: resolve the fetch window per source from bronze coverage in the
-anchor store, fetch each configured method, and land the resulting records
-into every configured storage. Each storage dedupes on
+anchor store, fetch each configured method, land into local first, then
+relay every local identity missing remotely. Each storage dedupes on
 (source, day, key, payload_hash): refetched days whose payload did not
 change write nothing, revised days append a fresh version, and days a
 source could not serve leave no row behind — they stay inside the refresh
 window and are retried on the next run.
+
+Sync (`delukit sync`) replays the same relay without fetching: any
+(source, day, key, payload_hash) present locally but missing in a remote
+is written there. Relay is at-least-once and idempotent, so a failed
+remote heals on the next run or the next sync, even outside the refresh
+window.
 
 The first run (empty coverage) backfills from config start; later runs
 fetch only the refresh window plus new days. A source that fails does not
@@ -68,6 +74,7 @@ def run(raw_config_path: str) -> RawConfig:
 
     fetched_at = datetime.now(UTC).replace(tzinfo=None)
     failures: list[str] = []
+    use_relay = "local" in stores
     for name, source_config in config.sources.items():
         window_start = _window_start(name, source_config, begin, coverage)
         if window_start > end:
@@ -84,18 +91,71 @@ def run(raw_config_path: str) -> RawConfig:
             failures.append(f"{name}: {error}")
             continue
         log.info("%s: %d records", name, len(records))
-        for store_name, store in stores.items():
+        targets = {"local": stores["local"]} if use_relay else stores
+        for store_name, store in targets.items():
             try:
                 written = store.write(records)
                 log.info("%s: %d rows", store_name, written, extra={"indent": 1})
             except Exception as error:  # noqa: BLE001 — a down store must not block the rest
                 log.error("%s failed: %s", store_name, error, extra={"indent": 1})
                 failures.append(f"{name} -> {store_name}: {error}")
+    failures.extend(_sync_from_local(stores))
     if failures:
         log.error("run failed: %s", "; ".join(failures))
         raise PipelineError("; ".join(failures))
     log.info("run complete")
     return config
+
+
+def sync(raw_config_path: str) -> RawConfig:
+    """Replay local bronze into every remote without fetching."""
+    config = load_raw_config(raw_config_path)
+    stores: dict[str, BronzeStore] = {
+        name: build_store(name) for name in config.storages
+    }
+    log.info("sync start · storages=%s", ", ".join(config.storages))
+    failures = _sync_from_local(stores)
+    if failures:
+        log.error("sync failed: %s", "; ".join(failures))
+        raise PipelineError("; ".join(failures))
+    log.info("sync complete")
+    return config
+
+
+def _sync_from_local(stores: dict[str, BronzeStore]) -> list[str]:
+    """Write every local identity missing remotely; return failure strings."""
+    if "local" not in stores or len(stores) < 2:
+        return []
+    local = stores["local"]
+    if not hasattr(local, "records_for"):
+        return ["sync: local store cannot serve records_for()"]
+    try:
+        local_idents = local.identities()
+    except Exception as error:  # noqa: BLE001 — unreadable local parquet
+        log.error("local sync failed: %s", error)
+        return [f"sync -> local: {error}"]
+    if not local_idents:
+        return []
+    failures: list[str] = []
+    for name, store in stores.items():
+        if name == "local":
+            continue
+        try:
+            missing = local_idents - store.identities()
+        except Exception as error:  # noqa: BLE001 — a down store must not block the rest
+            log.error("%s sync failed: %s", name, error, extra={"indent": 1})
+            failures.append(f"sync -> {name}: {error}")
+            continue
+        if not missing:
+            log.info("%s: in sync", name, extra={"indent": 1})
+            continue
+        try:
+            written = store.write(local.records_for(missing))
+            log.info("%s: %d rows (sync)", name, written, extra={"indent": 1})
+        except Exception as error:  # noqa: BLE001 — a down store must not block the rest
+            log.error("%s sync failed: %s", name, error, extra={"indent": 1})
+            failures.append(f"sync -> {name}: {error}")
+    return failures
 
 
 def _resolve(value: date | str, timezone_name: str) -> date:
