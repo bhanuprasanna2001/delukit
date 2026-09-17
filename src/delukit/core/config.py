@@ -124,15 +124,15 @@ def _validate(data: dict) -> None:
         raise ConfigError("timezone must be a string")
 
     storages = data["storages"]
-    if not isinstance(storages, list) or not all(
-        isinstance(item, str) for item in storages
+    if (
+        not isinstance(storages, list)
+        or not storages
+        or not all(isinstance(item, str) for item in storages)
     ):
-        raise ConfigError("storages must be a list of strings")
+        raise ConfigError("storages must be a non-empty list of strings")
     for storage in storages:
         if storage not in _KNOWN_STORAGES:
             raise ConfigError(f"unknown storage: {storage}")
-    if "local" not in storages:
-        raise ConfigError("storages must include local: it anchors the fetch watermark")
 
     sources = data["sources"]
     if not isinstance(sources, dict):

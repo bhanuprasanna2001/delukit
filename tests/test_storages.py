@@ -21,11 +21,28 @@ def values(rows):
 
 
 class FakeCursor:
-    def __init__(self):
+    def __init__(self, rows=None, rowcount=None, error=None):
         self.calls = []
+        self._rows = rows or []
+        self._rowcount = rowcount
+        self._error = error
+        self.rowcount = 0
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
+        if sql.lstrip().upper().startswith("SELECT") and self._error is not None:
+            raise self._error
+        if params is None:
+            return
+        if isinstance(self._rowcount, list):
+            self.rowcount = self._rowcount.pop(0) if self._rowcount else 0
+        elif self._rowcount is not None:
+            self.rowcount = self._rowcount
+        else:
+            self.rowcount = len(params) // 6
+
+    def fetchall(self):
+        return list(self._rows)
 
     def __enter__(self):
         return self
@@ -35,8 +52,8 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self):
-        self.cursor_ = FakeCursor()
+    def __init__(self, rows=None, rowcount=None, error=None):
+        self.cursor_ = FakeCursor(rows=rows, rowcount=rowcount, error=error)
 
     def cursor(self):
         return self.cursor_
@@ -170,6 +187,39 @@ class TestDatabricksStore:
         with pytest.raises(ValueError, match="DATABRICKS_"):
             DatabricksStore()
 
+    def test_write_returns_actual_inserted_not_attempted(self):
+        connection = FakeConnection(rowcount=0)
+        store = DatabricksStore(connection=connection)
+        rows = [record(), record(day=date(2026, 9, 16))]
+
+        assert store.write(rows) == 0
+
+    def test_write_sums_rowcounts_across_batches(self):
+        connection = FakeConnection(rowcount=[20, 0])
+        store = DatabricksStore(connection=connection)
+        rows = make_records(
+            "smard",
+            {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
+            FETCHED_AT,
+        )
+
+        assert store.write(rows) == 20
+
+    def test_coverage(self):
+        connection = FakeConnection(rows=[("smard", DAY), ("smard", "2026-09-16")])
+        store = DatabricksStore(connection=connection)
+
+        assert store.coverage() == {("smard", DAY), ("smard", date(2026, 9, 16))}
+        assert "SELECT DISTINCT" in connection.cursor_.calls[0][0]
+
+    def test_coverage_missing_table_returns_empty(self):
+        connection = FakeConnection(
+            error=Exception("TABLE_OR_VIEW_NOT_FOUND: delukit.bronze.payloads")
+        )
+        store = DatabricksStore(connection=connection)
+
+        assert store.coverage() == set()
+
 
 class TestSnowflakeStore:
     def test_write_merges_records(self):
@@ -221,3 +271,63 @@ class TestSnowflakeStore:
             monkeypatch.delenv(name, raising=False)
         with pytest.raises(ValueError, match="SNOWFLAKE_"):
             SnowflakeStore()
+
+    def test_write_returns_actual_inserted_not_attempted(self):
+        connection = FakeConnection(rowcount=0)
+        store = SnowflakeStore(connection=connection)
+
+        assert store.write([record()]) == 0
+
+    def test_write_sums_rowcounts_across_batches(self):
+        connection = FakeConnection(rowcount=[20, 0])
+        store = SnowflakeStore(connection=connection)
+        rows = make_records(
+            "smard",
+            {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
+            FETCHED_AT,
+        )
+
+        assert store.write(rows) == 20
+
+    def test_coverage(self):
+        connection = FakeConnection(rows=[("smard", DAY), ("smard", "2026-09-16")])
+        store = SnowflakeStore(connection=connection)
+
+        assert store.coverage() == {("smard", DAY), ("smard", date(2026, 9, 16))}
+        assert "SELECT DISTINCT" in connection.cursor_.calls[0][0]
+
+    def test_coverage_missing_table_returns_empty(self):
+        connection = FakeConnection(
+            error=Exception(
+                "002003 (02000): Object 'DELUKIT_DB.BRONZE.PAYLOADS' "
+                "does not exist or not authorized."
+            )
+        )
+        store = SnowflakeStore(connection=connection)
+
+        assert store.coverage() == set()
+
+    def test_coverage_propagates_unexpected_errors(self):
+        connection = FakeConnection(error=RuntimeError("connection refused"))
+        store = SnowflakeStore(connection=connection)
+
+        with pytest.raises(RuntimeError, match="connection refused"):
+            store.coverage()
+
+
+class TestCoverageHelpers:
+    def test_normalize_day(self):
+        from datetime import datetime
+
+        from delukit.storages.base import normalize_day
+
+        assert normalize_day(date(2026, 9, 15)) == date(2026, 9, 15)
+        assert normalize_day(datetime(2026, 9, 15, 6, 0)) == date(2026, 9, 15)  # noqa: DTZ001 — naive UTC by design
+        assert normalize_day("2026-09-15") == date(2026, 9, 15)
+
+    def test_is_missing_table(self):
+        from delukit.storages.base import is_missing_table
+
+        assert is_missing_table(Exception("does not exist"))
+        assert is_missing_table(Exception("TABLE_OR_VIEW_NOT_FOUND"))
+        assert not is_missing_table(RuntimeError("connection refused"))

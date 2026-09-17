@@ -115,12 +115,21 @@ def test_unknown_storage(tmp_path):
         load_raw_config(file)
 
 
-def test_storages_must_include_local(tmp_path):
-    data = {**VALID, "storages": ["databricks"]}
+def test_storages_may_omit_local(tmp_path):
+    for storages in (["databricks"], ["snowflake"], ["databricks", "snowflake"]):
+        data = {**VALID, "storages": storages}
+        file = tmp_path / "raw.json"
+        file.write_text(json.dumps(data))
+
+        assert load_raw_config(file).storages == storages
+
+
+def test_storages_must_be_non_empty(tmp_path):
+    data = {**VALID, "storages": []}
     file = tmp_path / "raw.json"
     file.write_text(json.dumps(data))
 
-    with pytest.raises(ConfigError, match="local"):
+    with pytest.raises(ConfigError, match="non-empty"):
         load_raw_config(file)
 
 

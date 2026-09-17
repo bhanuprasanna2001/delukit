@@ -58,15 +58,21 @@ class FakeSource:
 
 
 class FakeStore:
-    def __init__(self, error=None):
+    def __init__(self, error=None, coverage=None):
         self.written = []
         self.error = error
+        self._coverage = set(coverage or set())
+        self.coverage_calls = 0
 
     def write(self, records):
         if self.error is not None:
             raise self.error
         self.written.append(list(records))
         return len(records)
+
+    def coverage(self):
+        self.coverage_calls += 1
+        return set(self._coverage)
 
 
 def write_config(tmp_path, **overrides):
@@ -284,3 +290,30 @@ def test_records_land_in_every_configured_storage(monkeypatch, tmp_path):
     assert len(pd.read_parquet(local.file)) == 1
     assert len(databricks.written) == 1 and len(databricks.written[0]) == 1
     assert len(snowflake.written) == 1 and len(snowflake.written[0]) == 1
+
+
+def test_remote_only_uses_remote_coverage(monkeypatch, tmp_path):
+    path = write_config(tmp_path, storages=["databricks"])
+    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
+    databricks = FakeStore(coverage={("smard", TODAY - timedelta(days=1))})
+    patch(monkeypatch, {"smard": smard}, {"databricks": databricks})
+
+    run(str(path))
+
+    assert databricks.coverage_calls == 1
+    assert smard.calls[0][0] == TODAY - timedelta(days=7)
+    assert len(databricks.written) == 1
+
+
+def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
+    path = write_config(tmp_path, storages=["local", "databricks"])
+    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
+    local = LocalStore(tmp_path / "store")
+    seed(local, "smard", TODAY - timedelta(days=1))
+    databricks = FakeStore(coverage={("smard", TODAY - timedelta(days=30))})
+    patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
+
+    run(str(path))
+
+    assert databricks.coverage_calls == 0
+    assert smard.calls[0][0] == TODAY - timedelta(days=7)

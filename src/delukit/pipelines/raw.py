@@ -1,7 +1,7 @@
 """From APIs to Bronze.
 
 Daily run: resolve the fetch window per source from bronze coverage in the
-local store, fetch each configured method, and land the resulting records
+anchor store, fetch each configured method, and land the resulting records
 into every configured storage. Each storage dedupes on
 (source, day, key, payload_hash): refetched days whose payload did not
 change write nothing, revised days append a fresh version, and days a
@@ -27,7 +27,6 @@ from delukit.sources.build import build_source
 from delukit.sources.data_source import DataSource
 from delukit.storages import build_store
 from delukit.storages.base import BronzeStore
-from delukit.storages.local import LocalStore
 
 log = logging.getLogger("delukit.raw")
 
@@ -59,9 +58,13 @@ def run(raw_config_path: str) -> RawConfig:
     stores: dict[str, BronzeStore] = {
         name: build_store(name) for name in config.storages
     }
-    anchor = stores.get("local")
-    coverage = anchor.coverage() if isinstance(anchor, LocalStore) else set()
-    log.debug("coverage anchor: %d (source, day) pairs", len(coverage))
+    # ponytail: local anchor is a free parquet read; a remote anchor costs
+    # one SELECT DISTINCT per run — prefer local when configured.
+    anchor_name = "local" if "local" in stores else config.storages[0]
+    coverage = stores[anchor_name].coverage()
+    log.debug(
+        "coverage anchor (%s): %d (source, day) pairs", anchor_name, len(coverage)
+    )
 
     fetched_at = datetime.now(UTC).replace(tzinfo=None)
     failures: list[str] = []

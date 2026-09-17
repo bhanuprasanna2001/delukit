@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
+from datetime import date, datetime
 
 from tqdm import tqdm
 
@@ -28,6 +29,10 @@ class BronzeStore(ABC):
     def write(self, records: list[dict]) -> int:
         """Write records not already stored; return the number written."""
 
+    @abstractmethod
+    def coverage(self) -> set[tuple[str, date]]:
+        """Stored (source, day) pairs; days normalized to date objects."""
+
 
 def land_records(
     connection,
@@ -51,6 +56,7 @@ def land_records(
     """
     if not records:
         return 0
+    total = 0
     with connection.cursor() as cursor:
         for statement in ddl:
             cursor.execute(statement)
@@ -66,8 +72,30 @@ def land_records(
                 cursor.execute(
                     sql.format(table=table, values=rows), _flat_values(chunk)
                 )
+                total += cursor.rowcount
                 bar.update(len(chunk))
-    return len(records)
+    return total
+
+
+def normalize_day(value) -> date:
+    """Normalize a stored DAY value to a date object."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def is_missing_table(error: Exception) -> bool:
+    """True when an error means the bronze table does not exist yet."""
+    message = str(error).lower()
+    return (
+        "does not exist" in message
+        or "not found" in message
+        or "no such" in message
+        or "table_or_view_not_found" in message
+        or "002003" in message
+    )
 
 
 def _batches(records: list[dict], batch_size: int):

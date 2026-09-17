@@ -17,10 +17,16 @@ explicit connection.
 from __future__ import annotations
 
 import os
+from datetime import date
 
 from databricks import sql as databricks_sql
 
-from delukit.storages.base import BronzeStore, land_records
+from delukit.storages.base import (
+    BronzeStore,
+    is_missing_table,
+    land_records,
+    normalize_day,
+)
 
 _MERGE = """
 MERGE INTO {table} AS target
@@ -68,6 +74,17 @@ class DatabricksStore(BronzeStore):
             label="databricks",
             colour="blue",
         )
+
+    def coverage(self) -> set[tuple[str, date]]:
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(f"SELECT DISTINCT source, day FROM {self.table}")
+                rows = cursor.fetchall()
+        except Exception as error:
+            if is_missing_table(error):
+                return set()
+            raise
+        return {(source, normalize_day(day)) for source, day in rows}
 
 
 def _env(name: str) -> str:
