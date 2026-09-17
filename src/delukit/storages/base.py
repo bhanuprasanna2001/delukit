@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 
 from tqdm import tqdm
 
+from delukit.core.log import BAR_FORMAT
 from delukit.layers.bronze.records import RECORD_COLUMNS
 
 # ponytail: row cap + byte cap; a batch flushes on whichever hits first.
@@ -67,9 +67,14 @@ def land_records(
         with tqdm(
             total=len(records),
             desc=label,
+            bar_format=BAR_FORMAT,
             unit="rows",
             colour=colour,
-            disable=not sys.stderr.isatty(),
+            position=0,
+            leave=False,
+            dynamic_ncols=True,
+            mininterval=0.5,
+            disable=None,
         ) as bar:
             for chunk in _batches(records, batch_size):
                 rows = ", ".join(_row(marker) for _ in chunk)

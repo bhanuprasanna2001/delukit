@@ -23,6 +23,7 @@ source has landed.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -53,12 +54,13 @@ def run(raw_config_path: str) -> RawConfig:
     config = load_raw_config(raw_config_path)
     end = _resolve(config.end, config.timezone)
     begin = _resolve(config.start, config.timezone)
+    t0 = time.perf_counter()
     log.info(
-        "run start · sources=%s storages=%s window=%s..%s",
-        ", ".join(sorted(config.sources)),
-        ", ".join(config.storages),
+        "┌ run start · window=%s..%s · sources=%s · storages=%s",
         begin,
         end,
+        ", ".join(sorted(config.sources)),
+        ", ".join(config.storages),
     )
 
     stores: dict[str, BronzeStore] = {
@@ -74,36 +76,61 @@ def run(raw_config_path: str) -> RawConfig:
 
     fetched_at = datetime.now(UTC).replace(tzinfo=None)
     failures: list[str] = []
+    total_records = 0
     use_relay = "local" in stores
     for name, source_config in config.sources.items():
         window_start = _window_start(name, source_config, begin, coverage)
         if window_start > end:
-            log.info("%s: nothing new to fetch", name)
+            log.info("├─ %s: nothing new", name)
             continue
         log.debug("%s: fetching %s..%s", name, window_start, end)
         source = build_source(name, source_config, config.timezone)
+        t1 = time.perf_counter()
         try:
             records = _fetch_source(
                 source, name, source_config, window_start, end, fetched_at
             )
         except Exception as error:  # noqa: BLE001 — a source may raise anything; isolate it
-            log.error("%s failed: %s", name, error)
+            log.error("├─ %s failed: %s", name, error)
             failures.append(f"{name}: {error}")
             continue
-        log.info("%s: %d records", name, len(records))
+        total_records += len(records)
         targets = {"local": stores["local"]} if use_relay else stores
+        parts: list[str] = []
         for store_name, store in targets.items():
             try:
                 written = store.write(records)
-                log.info("%s: %d rows", store_name, written, extra={"indent": 1})
+                parts.append(f"{store_name} +{written}")
             except Exception as error:  # noqa: BLE001 — a down store must not block the rest
-                log.error("%s failed: %s", store_name, error, extra={"indent": 1})
+                log.error("├─ %s → %s failed: %s", name, store_name, error)
                 failures.append(f"{name} -> {store_name}: {error}")
-    failures.extend(_sync_from_local(stores))
+        if parts:
+            log.info(
+                "├─ %s: %d fetched · %s · %s",
+                name,
+                len(records),
+                _fmt_elapsed(time.perf_counter() - t1),
+                " · ".join(parts),
+            )
+    sync_failures, synced = _sync_from_local(stores)
+    failures.extend(sync_failures)
+    elapsed = _fmt_elapsed(time.perf_counter() - t0)
     if failures:
-        log.error("run failed: %s", "; ".join(failures))
+        log.error(
+            "└ run failed · %d fetched · %s · %d synced · %d failed: %s",
+            total_records,
+            elapsed,
+            synced,
+            len(failures),
+            "; ".join(failures),
+        )
         raise PipelineError("; ".join(failures))
-    log.info("run complete")
+    log.info(
+        "└ run complete · %d fetched · %s · %d synced",
+        total_records,
+        elapsed,
+        synced,
+    )
     return config
 
 
@@ -113,49 +140,71 @@ def sync(raw_config_path: str) -> RawConfig:
     stores: dict[str, BronzeStore] = {
         name: build_store(name) for name in config.storages
     }
-    log.info("sync start · storages=%s", ", ".join(config.storages))
-    failures = _sync_from_local(stores)
+    t0 = time.perf_counter()
+    log.info("┌ sync start · storages=%s", ", ".join(config.storages))
+    failures, synced = _sync_from_local(stores)
+    elapsed = _fmt_elapsed(time.perf_counter() - t0)
     if failures:
-        log.error("sync failed: %s", "; ".join(failures))
+        log.error(
+            "└ sync failed · %s · %d synced · %d failed: %s",
+            elapsed,
+            synced,
+            len(failures),
+            "; ".join(failures),
+        )
         raise PipelineError("; ".join(failures))
-    log.info("sync complete")
+    log.info("└ sync complete · %s · %d synced", elapsed, synced)
     return config
 
 
-def _sync_from_local(stores: dict[str, BronzeStore]) -> list[str]:
-    """Write every local identity missing remotely; return failure strings."""
+def _sync_from_local(stores: dict[str, BronzeStore]) -> tuple[list[str], int]:
+    """Write every local identity missing remotely; return (failures, synced)."""
     if "local" not in stores or len(stores) < 2:
-        return []
+        return [], 0
     local = stores["local"]
     if not hasattr(local, "records_for"):
-        return ["sync: local store cannot serve records_for()"]
+        return ["sync: local store cannot serve records_for()"], 0
     try:
         local_idents = local.identities()
     except Exception as error:  # noqa: BLE001 — unreadable local parquet
-        log.error("local sync failed: %s", error)
-        return [f"sync -> local: {error}"]
+        log.error("├─ local sync failed: %s", error)
+        return [f"sync -> local: {error}"], 0
     if not local_idents:
-        return []
+        return [], 0
     failures: list[str] = []
+    synced = 0
     for name, store in stores.items():
         if name == "local":
             continue
         try:
             missing = local_idents - store.identities()
         except Exception as error:  # noqa: BLE001 — a down store must not block the rest
-            log.error("%s sync failed: %s", name, error, extra={"indent": 1})
+            log.error("├─ %s sync failed: %s", name, error)
             failures.append(f"sync -> {name}: {error}")
             continue
         if not missing:
-            log.info("%s: in sync", name, extra={"indent": 1})
+            log.info("├─ %s: in sync", name)
             continue
         try:
             written = store.write(local.records_for(missing))
-            log.info("%s: %d rows (sync)", name, written, extra={"indent": 1})
+            synced += written
+            log.info("├─ %s: +%d synced", name, written)
         except Exception as error:  # noqa: BLE001 — a down store must not block the rest
-            log.error("%s sync failed: %s", name, error, extra={"indent": 1})
+            log.error("├─ %s sync failed: %s", name, error)
             failures.append(f"sync -> {name}: {error}")
-    return failures
+    return failures, synced
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Compact duration: 12s, 5m42s, 1h02m03s."""
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total}s"
+    minutes, secs = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{secs:02d}s"
 
 
 def _resolve(value: date | str, timezone_name: str) -> date:
@@ -210,7 +259,7 @@ def _fetch_source(
             if key not in ("method", "fetch_policy")
         }
         kwargs = {} if name == "weather" else {**common, "method": method, **params}
-        log.debug("%s: fetching", method, extra={"indent": 1})
+        log.debug("%s %s fetching", name, method)
         raws = source.fetch(start, end, **kwargs)
         records.extend(make_records(name, raws, fetched_at))
     return records

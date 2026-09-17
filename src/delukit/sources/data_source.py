@@ -6,7 +6,6 @@ and leave parsing to the silver layer.
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -17,12 +16,9 @@ import requests
 from pyrate_limiter import Limiter
 from tqdm import tqdm
 
+from delukit.core.log import BAR_FORMAT
+
 TRANSIENT_STATUSES = frozenset({408, 425, 429})
-
-
-def _progress_disabled() -> bool:
-    """Show progress bars only when stderr is a terminal (not tests/cron)."""
-    return not sys.stderr.isatty()
 
 
 class SourceError(Exception):
@@ -62,8 +58,14 @@ class DataSource(ABC):
         with tqdm(
             total=(end - start).days + 1,
             desc=f"{self.name} {method}".strip(),
+            bar_format=BAR_FORMAT,
             colour=self.colour,
-            disable=_progress_disabled(),
+            unit="d",
+            position=0,
+            leave=False,
+            dynamic_ncols=True,
+            mininterval=0.5,
+            disable=None,
         ) as bar:
             while day <= end:
                 results[day] = self._fetch_day(day, **params)
