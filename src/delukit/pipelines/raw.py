@@ -30,10 +30,9 @@ from zoneinfo import ZoneInfo
 
 from delukit.core.config import RawConfig, load_raw_config
 from delukit.layers.bronze.records import make_records
+from delukit.layers.bronze.store import BronzeStore, build_bronze_store
 from delukit.sources.build import build_source
 from delukit.sources.data_source import DataSource
-from delukit.storages import build_store
-from delukit.storages.base import BronzeStore
 
 log = logging.getLogger("delukit.raw")
 
@@ -64,7 +63,7 @@ def run(raw_config_path: str) -> RawConfig:
     )
 
     stores: dict[str, BronzeStore] = {
-        name: build_store(name) for name in config.storages
+        name: build_bronze_store(name) for name in config.storages
     }
     # ponytail: local anchor is a free parquet read; a remote anchor costs
     # one SELECT DISTINCT per run — prefer local when configured.
@@ -138,7 +137,7 @@ def sync(raw_config_path: str) -> RawConfig:
     """Replay local bronze into every remote without fetching."""
     config = load_raw_config(raw_config_path)
     stores: dict[str, BronzeStore] = {
-        name: build_store(name) for name in config.storages
+        name: build_bronze_store(name) for name in config.storages
     }
     t0 = time.perf_counter()
     log.info("┌ sync start · storages=%s", ", ".join(config.storages))

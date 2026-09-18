@@ -29,15 +29,16 @@ def _records():
 
 
 def test_snowflake_roundtrip():
-    from delukit.storages.snowflake import SnowflakeStore
+    from delukit.backends import build_backend
+    from delukit.layers.bronze.store import SqlBronzeStore
 
     table = f"DELUKIT_DB.BRONZE.PAYLOADS_TEST_{uuid.uuid4().hex[:12].upper()}"
-    store = SnowflakeStore(table=table)
+    store = SqlBronzeStore(build_backend("snowflake"), table=table)
     try:
         assert store.coverage() == set()
         assert store.write(_records()) == 1
         assert store.write(_records()) == 0
         assert store.coverage() == {("smard", DAY)}
     finally:
-        with store.connection.cursor() as cursor:
+        with store.backend.connection.cursor() as cursor:
             cursor.execute(f"DROP TABLE IF EXISTS {table}")

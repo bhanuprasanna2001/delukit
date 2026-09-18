@@ -13,8 +13,6 @@ from typing import Any
 
 from delukit.layers.bronze.semantic import semantic_hash
 
-RECORD_COLUMNS = ["source", "day", "key", "payload", "payload_hash", "fetched_at"]
-
 
 def make_records(
     source: str, raws: dict[Any, dict[str, Any]], fetched_at: datetime

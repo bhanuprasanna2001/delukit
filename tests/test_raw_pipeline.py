@@ -4,9 +4,9 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
+from delukit.layers.bronze.store import LocalBronzeStore
 from delukit.pipelines.raw import PipelineError, run
 from delukit.sources.data_source import SourceError
-from delukit.storages.local import LocalStore
 
 TODAY = date(2026, 9, 16)
 START = date(2025, 10, 1)
@@ -106,7 +106,7 @@ def patch(monkeypatch, sources, store_map):
         lambda name, config, tz: sources[name],
     )
     monkeypatch.setattr(
-        "delukit.pipelines.raw.build_store", lambda name: store_map[name]
+        "delukit.pipelines.raw.build_bronze_store", lambda name: store_map[name]
     )
     monkeypatch.setattr("delukit.pipelines.raw._today", lambda tz: TODAY)
 
@@ -120,7 +120,7 @@ def seed(store, source, day, payload=SMARD_PAYLOAD, key="day_ahead_price"):
 def test_first_run_backfills_from_start(monkeypatch, tmp_path):
     path = write_config(tmp_path)
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
 
     run(str(path))
@@ -138,7 +138,7 @@ def test_first_run_backfills_from_start(monkeypatch, tmp_path):
 def test_second_run_fetches_refresh_window_only(monkeypatch, tmp_path):
     path = write_config(tmp_path)
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
     seed(local, "smard", TODAY - timedelta(days=1))
 
@@ -153,7 +153,7 @@ def test_refresh_days_config_override(monkeypatch, tmp_path):
         tmp_path, sources={"smard": {**SMARD_CONFIG, "refresh_days": 2}}
     )
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
     seed(local, "smard", TODAY - timedelta(days=1))
 
@@ -174,7 +174,7 @@ def test_weather_default_refresh_days(monkeypatch, tmp_path):
             }
         }
     )
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"weather": weather}, {"local": local})
     seed(
         local,
@@ -192,7 +192,7 @@ def test_weather_default_refresh_days(monkeypatch, tmp_path):
 def test_revised_payload_appends_version_without_duplicates(monkeypatch, tmp_path):
     path = write_config(tmp_path)
     smard = FakeSource(raws={TODAY: {"day_ahead_price": '{"series": [[1, 42.5]]}'}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
 
     run(str(path))
@@ -211,7 +211,7 @@ def test_revised_payload_appends_version_without_duplicates(monkeypatch, tmp_pat
 def test_tail_holes_stay_inside_fetch_window(monkeypatch, tmp_path):
     path = write_config(tmp_path)
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
     seed(local, "smard", TODAY - timedelta(days=3))
 
@@ -234,7 +234,7 @@ def test_failed_source_does_not_block_others(monkeypatch, tmp_path):
     charts = FakeSource(
         raws={TODAY: {"day_ahead_price": '{"unix_seconds": [1], "price": [40.0]}'}}
     )
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(
         monkeypatch,
         {"smard": smard, "energy_charts": charts},
@@ -261,7 +261,7 @@ def test_fetch_policy_not_passed_to_source(monkeypatch, tmp_path):
     charts = FakeSource(
         raws={TODAY: {"day_ahead_price": '{"unix_seconds": [1], "price": [40.0]}'}}
     )
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"energy_charts": charts}, {"local": local})
 
     run(str(path))
@@ -274,7 +274,7 @@ def test_fetch_policy_not_passed_to_source(monkeypatch, tmp_path):
 def test_failed_store_does_not_block_other_stores(monkeypatch, tmp_path):
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     databricks = FakeStore(error=RuntimeError("connection refused"))
     patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
 
@@ -287,7 +287,7 @@ def test_failed_store_does_not_block_other_stores(monkeypatch, tmp_path):
 def test_records_land_in_every_configured_storage(monkeypatch, tmp_path):
     path = write_config(tmp_path, storages=["local", "databricks", "snowflake"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     databricks = FakeStore()
     snowflake = FakeStore()
     patch(
@@ -319,7 +319,7 @@ def test_remote_only_uses_remote_coverage(monkeypatch, tmp_path):
 def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     seed(local, "smard", TODAY - timedelta(days=1))
     databricks = FakeStore(coverage={("smard", TODAY - timedelta(days=30))})
     patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
@@ -335,7 +335,7 @@ def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     databricks = FakeStore(error=RuntimeError("connection refused"))
     patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
 
@@ -357,7 +357,7 @@ def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     old = TODAY - timedelta(days=30)
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     seed(local, "smard", old)
     databricks = FakeStore()
     patch(
@@ -377,7 +377,7 @@ def test_revised_payload_syncs_new_version_only(monkeypatch, tmp_path):
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalStore(tmp_path / "store")
+    local = LocalBronzeStore(tmp_path / "store")
     databricks = FakeStore()
     patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
     run(str(path))

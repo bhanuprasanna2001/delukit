@@ -1,8 +1,9 @@
 import json
 from datetime import date, datetime
 
-from delukit.layers.bronze.records import RECORD_COLUMNS, make_records
+from delukit.layers.bronze.records import make_records
 from delukit.layers.bronze.semantic import semantic_hash
+from delukit.layers.bronze.tables import RECORD_COLUMNS
 
 FETCHED_AT = datetime(2026, 9, 16, 6, 0, 0)  # noqa: DTZ001 — naive UTC by design
 DAY = date(2026, 9, 15)

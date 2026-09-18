@@ -29,15 +29,16 @@ def _records():
 
 
 def test_databricks_roundtrip():
-    from delukit.storages.databricks import DatabricksStore
+    from delukit.backends import build_backend
+    from delukit.layers.bronze.store import SqlBronzeStore
 
     table = f"delukit.bronze.payloads_test_{uuid.uuid4().hex[:12]}"
-    store = DatabricksStore(table=table)
+    store = SqlBronzeStore(build_backend("databricks"), table=table)
     try:
         assert store.coverage() == set()
         assert store.write(_records()) == 1
         assert store.write(_records()) == 0
         assert store.coverage() == {("smard", DAY)}
     finally:
-        with store.connection.cursor() as cursor:
+        with store.backend.connection.cursor() as cursor:
             cursor.execute(f"DROP TABLE IF EXISTS {table}")
