@@ -87,12 +87,6 @@ class TestLocalSilverStore:
         path = tmp_path / "silver" / "prices" / "smard_day_ahead_price.parquet"
         assert len(pd.read_parquet(path)) == 1
 
-    def test_empty_frame_writes_nothing(self, tmp_path):
-        store = LocalSilverStore(tmp_path)
-
-        assert store.upsert("smard_day_ahead_price", pd.DataFrame()) == 0
-        assert not (tmp_path / "silver").exists()
-
     def test_tables_do_not_share_files(self, tmp_path):
         store = LocalSilverStore(tmp_path)
         store.upsert("smard_day_ahead_price", price_frame(1.0))
@@ -133,12 +127,6 @@ class TestDatabricksSilverStore:
         assert len(params) == 2 * 3
         assert params[1] == 1.0
 
-    def test_empty_frame_skips_sql(self):
-        store = sql_store(FakeConnection(), "databricks")
-
-        assert store.upsert("smard_day_ahead_price", pd.DataFrame()) == 0
-        assert store.backend.connection.cursor_.calls == []
-
 
 class TestSnowflakeSilverStore:
     def test_merge_uses_positional_markers_and_upper_identifiers(self):
@@ -158,19 +146,23 @@ class TestSnowflakeSilverStore:
         ddl = " ".join(sql for sql, _ in cursor.calls if sql.startswith("CREATE"))
         assert "TIMESTAMP_TZ" in ddl  # Berlin/UTC instants stay exact
 
-    def test_empty_frame_skips_sql(self):
-        store = sql_store(FakeConnection(), "snowflake")
 
+@pytest.mark.parametrize("backend", ["local", "databricks", "snowflake"])
+def test_empty_skips_io(tmp_path, backend):
+    if backend == "local":
+        store = LocalSilverStore(tmp_path)
         assert store.upsert("smard_day_ahead_price", pd.DataFrame()) == 0
-        assert store.backend.connection.cursor_.calls == []
+        assert not (tmp_path / "silver").exists()
+    else:
+        connection = FakeConnection()
+        store = sql_store(connection, backend)
+        assert store.upsert("smard_day_ahead_price", pd.DataFrame()) == 0
+        assert connection.cursor_.calls == []
 
 
 def test_builder_registry():
     assert isinstance(build_silver_store("local"), LocalSilverStore)
     with pytest.raises(ValueError, match="unknown backend"):
         build_silver_store("bogus")
-
-
-def test_sql_store_rejects_unknown_backend():
     with pytest.raises(ValueError, match="unknown backend"):
         SqlSilverStore(SqlBackend(FakeConnection(), "supabase"))

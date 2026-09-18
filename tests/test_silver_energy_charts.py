@@ -22,29 +22,26 @@ def price_doc(points, start="2025-10-01 00:00:00+02:00", step_min=15):
     )
 
 
-def test_15min_day():
-    prices = [50.0 + i for i in range(96)]
+@pytest.mark.parametrize(
+    ("n", "step_min", "delta"),
+    [(96, 15, "15min"), (24, 60, "60min")],
+)
+def test_15min_day(n, step_min, delta):
+    prices = [50.0 + i for i in range(n)]
 
-    frame = parse_day({"day_ahead_price": price_doc(prices)}, "day_ahead_price", tz=TZ)
+    frame = parse_day(
+        {"day_ahead_price": price_doc(prices, step_min=step_min)},
+        "day_ahead_price",
+        tz=TZ,
+    )
 
     assert list(frame.columns) == ["timestamp", "price_eur_per_mwh", "sequence"]
-    assert len(frame) == 96
+    assert len(frame) == n
     assert frame["price_eur_per_mwh"].tolist() == prices
     assert (frame["sequence"] == 1).all()
     assert frame["timestamp"].iloc[0] == pd.Timestamp("2025-10-01 00:00", tz=TZ)
-    assert frame["timestamp"].diff().iloc[1] == pd.Timedelta("15min")
+    assert frame["timestamp"].diff().iloc[1] == pd.Timedelta(delta)
     assert frame["timestamp"].dt.tz.key == TZ
-
-
-def test_hourly_day():
-    prices = [50.0 + i for i in range(24)]
-
-    frame = parse_day(
-        {"day_ahead_price": price_doc(prices, step_min=60)}, "day_ahead_price", tz=TZ
-    )
-
-    assert len(frame) == 24
-    assert frame["timestamp"].diff().iloc[1] == pd.Timedelta("60min")
 
 
 def test_spring_forward_day_skips_hour_02():
@@ -76,11 +73,9 @@ def test_fall_back_day_spans_25_hours():
     assert frame["timestamp"].iloc[-1] == pd.Timestamp("2026-10-25 23:45+01:00")
 
 
-def test_missing_doc_is_empty():
+def test_missing_or_empty_is_empty():
     assert parse_day({}, "day_ahead_price", tz=TZ).empty
 
-
-def test_empty_arrays_give_empty_frame_with_columns():
     frame = parse_day({"day_ahead_price": price_doc([])}, "day_ahead_price", tz=TZ)
 
     assert frame.empty

@@ -115,24 +115,8 @@ def test_each_source_lands_in_its_own_table(monkeypatch, tmp_path):
     assert "location" not in by_table["smard_day_ahead_price"].columns
 
 
-def test_rerun_overwrites_without_duplicates(monkeypatch, tmp_path):
-    path = write_config(tmp_path, {"smard": SMARD_CONFIG})
-    bronze = LocalBronzeStore(tmp_path / "bronze")
-    seed(bronze, "smard", {DAY: {"day_ahead_price": smard_doc([1.0])}})
-    silver = LocalSilverStore(tmp_path / "silver")
-    patch(monkeypatch, bronze, {"local": silver})
-
-    run(path)
-    run(path)
-
-    frame = pd.read_parquet(
-        tmp_path / "silver" / "silver" / "prices" / "smard_day_ahead_price.parquet"
-    )
-    assert len(frame) == 1
-    assert frame["price_eur_per_mwh"].tolist() == [1.0]
-
-
-def test_revised_bronze_replaces_silver_rows(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("second", "expected"), [(None, [1.0]), ([9.0], [9.0])])
+def test_rerun_is_idempotent(monkeypatch, tmp_path, second, expected):
     path = write_config(tmp_path, {"smard": SMARD_CONFIG})
     bronze = LocalBronzeStore(tmp_path / "bronze")
     seed(bronze, "smard", {DAY: {"day_ahead_price": smard_doc([1.0])}}, T0)
@@ -140,14 +124,17 @@ def test_revised_bronze_replaces_silver_rows(monkeypatch, tmp_path):
     patch(monkeypatch, bronze, {"local": silver})
     run(path)
 
-    seed(bronze, "smard", {DAY: {"day_ahead_price": smard_doc([9.0])}}, T1)
-    run(path)
+    if second is None:
+        run(path)
+    else:
+        seed(bronze, "smard", {DAY: {"day_ahead_price": smard_doc(second)}}, T1)
+        run(path)
 
     frame = pd.read_parquet(
         tmp_path / "silver" / "silver" / "prices" / "smard_day_ahead_price.parquet"
     )
     assert len(frame) == 1
-    assert frame["price_eur_per_mwh"].tolist() == [9.0]
+    assert frame["price_eur_per_mwh"].tolist() == expected
 
 
 def test_corrupt_day_fails_but_blocks_nothing_else(monkeypatch, tmp_path):

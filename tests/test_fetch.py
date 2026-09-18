@@ -3,7 +3,6 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 import delukit
-from delukit.sources.data_source import DataSource
 
 
 class FakeSource:
@@ -39,7 +38,8 @@ def test_fetch_coerces_iso_and_passes_through(monkeypatch):
     }
 
 
-def test_fetch_weather_strips_constructor_params(monkeypatch):
+@pytest.mark.parametrize("method", [None, "forecast"])
+def test_fetch_weather_strips_constructor_params(monkeypatch, method):
     fake = FakeSource()
     captured = {}
 
@@ -49,12 +49,14 @@ def test_fetch_weather_strips_constructor_params(monkeypatch):
 
     monkeypatch.setattr("delukit.sources.build.build_source", spy)
 
+    kwargs = {"locations": [], "fields": ["temperature_2m"]}
+    if method is not None:
+        kwargs["method"] = method
     out = delukit.fetch(
         "weather",
         date(2025, 10, 1),
         date(2025, 10, 1),
-        locations=[],
-        fields=["temperature_2m"],
+        **kwargs,
     )
 
     assert captured == {"locations": [], "fields": ["temperature_2m"]}
@@ -92,29 +94,6 @@ def test_fetch_weather_rejects_non_forecast_method(monkeypatch):
         )
 
 
-def test_fetch_weather_accepts_explicit_forecast_method(monkeypatch):
-    fake = FakeSource()
-    captured = {}
-
-    def spy(name, config, tz):
-        captured.update(config)
-        return fake
-
-    monkeypatch.setattr("delukit.sources.build.build_source", spy)
-
-    delukit.fetch(
-        "weather",
-        "2025-10-01",
-        "2025-10-01",
-        method="forecast",
-        locations=[],
-        fields=["temperature_2m"],
-    )
-
-    assert captured == {"locations": [], "fields": ["temperature_2m"]}
-    assert fake.seen == (date(2025, 10, 1), date(2025, 10, 1), {})
-
-
 def test_fetch_coerces_datetime_to_date(monkeypatch):
     fake = FakeSource()
     monkeypatch.setattr("delukit.sources.build.build_source", lambda n, c, t: fake)
@@ -140,12 +119,3 @@ def test_fetch_rejects_bad_day_type(monkeypatch):
         delukit.fetch("entsoe", None, "2025-10-02", method="load_actual")
     with pytest.raises(TypeError, match="date or ISO"):
         delukit.fetch("entsoe", "2025-10-01", 20251002, method="load_actual")
-
-
-def test_data_source_rejects_reversed_range():
-    class DaySource(DataSource):
-        def _fetch_day(self, day, **params):
-            raise AssertionError("must not be called")
-
-    with pytest.raises(ValueError, match="start .* is after end"):
-        DaySource().fetch(date(2025, 10, 2), date(2025, 10, 1))

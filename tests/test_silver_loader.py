@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+import pytest
 
 from delukit.layers.bronze.records import make_records
 from delukit.layers.bronze.store import LocalBronzeStore
@@ -80,24 +81,24 @@ def test_groups_keys_per_day_and_filters_window(tmp_path):
     assert raws[DAY] == {"load_actual": entsoe_doc(1), "load_forecast": entsoe_doc(2)}
 
 
-def test_weather_payloads_come_back_as_dicts(tmp_path):
+@pytest.mark.parametrize(
+    ("source", "key"), [("weather", "forecast"), ("smard", "day_ahead_price")]
+)
+def test_payload_type_dispatch(tmp_path, source, key):
     store = LocalBronzeStore(tmp_path)
-    seed(store, "weather", {DAY: {"forecast": weather_payload()}})
+    seed(
+        store,
+        source,
+        {DAY: {key: weather_payload() if source == "weather" else smard_payload()}},
+    )
 
-    raws = load_latest(tmp_path, "weather", DAY, DAY)
+    raws = load_latest(tmp_path, source, DAY, DAY)
 
-    assert raws[DAY]["forecast"]["locations"]["berlin"]["hourly"]["temperature_2m"] == [
-        21.5
-    ]
-
-
-def test_other_sources_stay_text(tmp_path):
-    store = LocalBronzeStore(tmp_path)
-    seed(store, "smard", {DAY: {"day_ahead_price": smard_payload()}})
-
-    raws = load_latest(tmp_path, "smard", DAY, DAY)
-
-    assert isinstance(raws[DAY]["day_ahead_price"], str)
+    value = raws[DAY][key]
+    if source == "weather":
+        assert value["locations"]["berlin"]["hourly"]["temperature_2m"] == [21.5]
+    else:
+        assert isinstance(value, str)
 
 
 def test_empty_bronze_is_empty(tmp_path):

@@ -4,9 +4,10 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
+from delukit.layers.bronze.records import make_records
 from delukit.layers.bronze.store import LocalBronzeStore
 from delukit.pipelines import PipelineError
-from delukit.pipelines.bronze import run
+from delukit.pipelines.bronze import run, sync
 from delukit.sources.data_source import SourceError
 
 TODAY = date(2026, 9, 16)
@@ -113,8 +114,6 @@ def patch(monkeypatch, sources, store_map):
 
 
 def seed(store, source, day, payload=SMARD_PAYLOAD, key="day_ahead_price"):
-    from delukit.layers.bronze.records import make_records
-
     store.write(make_records(source, {day: {key: payload}}, TODAY - timedelta(days=1)))
 
 
@@ -136,31 +135,24 @@ def test_first_run_backfills_from_start(monkeypatch, tmp_path):
     assert len(pd.read_parquet(local.file)) == 1
 
 
-def test_second_run_fetches_refresh_window_only(monkeypatch, tmp_path):
-    path = write_config(tmp_path)
-    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalBronzeStore(tmp_path / "store")
-    patch(monkeypatch, {"smard": smard}, {"local": local})
-    seed(local, "smard", TODAY - timedelta(days=1))
-
-    run(str(path))
-
-    assert smard.calls[0][0] == TODAY - timedelta(days=7)
-    assert smard.calls[0][1] == TODAY
-
-
-def test_refresh_days_config_override(monkeypatch, tmp_path):
-    path = write_config(
-        tmp_path, sources={"smard": {**SMARD_CONFIG, "refresh_days": 2}}
+@pytest.mark.parametrize(
+    "seed_ago, refresh_days, expected_ago",
+    [(1, None, 7), (1, 2, 2), (3, None, 9)],
+)
+def test_refresh_window(monkeypatch, tmp_path, seed_ago, refresh_days, expected_ago):
+    smard_config = (
+        {**SMARD_CONFIG, "refresh_days": refresh_days} if refresh_days else SMARD_CONFIG
     )
+    path = write_config(tmp_path, sources={"smard": smard_config})
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
     local = LocalBronzeStore(tmp_path / "store")
     patch(monkeypatch, {"smard": smard}, {"local": local})
-    seed(local, "smard", TODAY - timedelta(days=1))
+    seed(local, "smard", TODAY - timedelta(days=seed_ago))
 
     run(str(path))
 
-    assert smard.calls[0][0] == TODAY - timedelta(days=2)
+    assert smard.calls[0][0] == TODAY - timedelta(days=expected_ago)
+    assert smard.calls[0][1] == TODAY
 
 
 def test_weather_default_refresh_days(monkeypatch, tmp_path):
@@ -207,20 +199,6 @@ def test_revised_payload_appends_version_without_duplicates(monkeypatch, tmp_pat
         '{"series": [[1, 42.5]]}',
         '{"series": [[1, 43.0]]}',
     }
-
-
-def test_tail_holes_stay_inside_fetch_window(monkeypatch, tmp_path):
-    path = write_config(tmp_path)
-    smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalBronzeStore(tmp_path / "store")
-    patch(monkeypatch, {"smard": smard}, {"local": local})
-    seed(local, "smard", TODAY - timedelta(days=3))
-
-    run(str(path))
-
-    start, end, _ = smard.calls[0]
-    assert start == TODAY - timedelta(days=9)
-    assert end == TODAY
 
 
 def test_failed_source_does_not_block_others(monkeypatch, tmp_path):
@@ -304,8 +282,11 @@ def test_records_land_in_every_configured_storage(monkeypatch, tmp_path):
     assert len(snowflake.written) == 1 and len(snowflake.written[0]) == 1
 
 
-def test_remote_only_uses_remote_coverage(monkeypatch, tmp_path):
-    path = write_config(tmp_path, storages=["databricks"])
+def test_coverage_anchor_prefers_local(monkeypatch, tmp_path):
+    # remote-only: falls back to remote coverage.
+    remote_dir = tmp_path / "remote"
+    remote_dir.mkdir()
+    path = write_config(remote_dir, storages=["databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
     databricks = FakeStore(coverage={("smard", TODAY - timedelta(days=1))})
     patch(monkeypatch, {"smard": smard}, {"databricks": databricks})
@@ -316,11 +297,12 @@ def test_remote_only_uses_remote_coverage(monkeypatch, tmp_path):
     assert smard.calls[0][0] == TODAY - timedelta(days=7)
     assert len(databricks.written) == 1
 
-
-def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
-    path = write_config(tmp_path, storages=["local", "databricks"])
+    # local present: local anchors the window, remote coverage untouched.
+    local_dir = tmp_path / "local"
+    local_dir.mkdir()
+    path = write_config(local_dir, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
-    local = LocalBronzeStore(tmp_path / "store")
+    local = LocalBronzeStore(local_dir / "store")
     seed(local, "smard", TODAY - timedelta(days=1))
     databricks = FakeStore(coverage={("smard", TODAY - timedelta(days=30))})
     patch(monkeypatch, {"smard": smard}, {"local": local, "databricks": databricks})
@@ -332,8 +314,6 @@ def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
 
 
 def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
-    from delukit.pipelines.bronze import sync
-
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
     local = LocalBronzeStore(tmp_path / "store")
@@ -354,8 +334,6 @@ def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
 
 
 def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
-    from delukit.pipelines.bronze import sync
-
     path = write_config(tmp_path, storages=["local", "databricks"])
     old = TODAY - timedelta(days=30)
     local = LocalBronzeStore(tmp_path / "store")
@@ -374,8 +352,6 @@ def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
 
 
 def test_revised_payload_syncs_new_version_only(monkeypatch, tmp_path):
-    from delukit.pipelines.bronze import sync
-
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
     local = LocalBronzeStore(tmp_path / "store")

@@ -83,27 +83,27 @@ def test_partial_nulls_are_kept():
     assert frame["temperature_2m"].iloc[1] == 12.6
 
 
-def test_missing_doc_is_empty():
-    assert parse_day({}, "forecast", tz=TZ).empty
-
-
-def test_unknown_method():
-    with pytest.raises(ValueError, match="unknown weather method"):
-        parse_day({}, "bogus")
-
-
-def test_missing_locations_raises():
-    with pytest.raises(ValueError, match="locations"):
-        parse_day({"forecast": {"run": "2025-10-01T00:00"}}, "forecast", tz=TZ)
-
-
-def test_missing_run_raises():
-    with pytest.raises(ValueError, match="run must be a string"):
-        parse_day(
+@pytest.mark.parametrize(
+    ("raws", "method", "match"),
+    [
+        ({}, "forecast", None),
+        ({}, "bogus", "unknown weather method"),
+        ({"forecast": {"run": "2025-10-01T00:00"}}, "forecast", "locations"),
+        (
             {"forecast": {"locations": {"berlin": item(TIMES, [1.0], [2.0])}}},
             "forecast",
-            tz=TZ,
-        )
+            "run must be a string",
+        ),
+        (raw({"latitude": 52.5}), "forecast", "missing hourly data"),
+        ({"forecast": "not a dict"}, "forecast", "unparseable forecast"),
+    ],
+)
+def test_bad_inputs_raise(raws, method, match):
+    if match is None:
+        assert parse_day(raws, method, tz=TZ).empty
+    else:
+        with pytest.raises(ValueError, match=match):
+            parse_day(raws, method, tz=TZ)
 
 
 def test_mismatched_array_lengths_raise():
@@ -113,8 +113,6 @@ def test_mismatched_array_lengths_raise():
     with pytest.raises(ValueError, match="mismatched array lengths"):
         parse_day(raw(bad), "forecast", tz=TZ)
 
-
-def test_scalar_field_raises():
     bad = item(TIMES, [12.5], [20.0])
     bad["hourly"]["temperature_2m"] = 12.5
 
@@ -160,13 +158,3 @@ def test_fall_back_day_keeps_both_duplicate_hours():
         != frame["valid_time"].iloc[2].utcoffset()
     )
     assert frame["temperature_2m"].tolist() == [10.0, 11.0, 12.0, 13.0]
-
-
-def test_missing_hourly_raises():
-    with pytest.raises(ValueError, match="missing hourly data"):
-        parse_day(raw({"latitude": 52.5}), "forecast", tz=TZ)
-
-
-def test_malformed_payload_raises_clean_error():
-    with pytest.raises(ValueError, match="unparseable forecast"):
-        parse_day({"forecast": "not a dict"}, "forecast", tz=TZ)

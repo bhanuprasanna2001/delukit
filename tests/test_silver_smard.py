@@ -34,24 +34,19 @@ def test_price_15min_day():
     assert frame["timestamp"].dt.tz.key == TZ
 
 
-def test_load_actual():
-    points = day_points("2025-10-01 00:00:00+02:00", 96)
+@pytest.mark.parametrize(
+    ("method", "n", "step_min", "delta"),
+    [("load_actual", 96, 15, "15min"), ("load_forecast", 24, 60, "60min")],
+)
+def test_load(method, n, step_min, delta):
+    points = day_points("2025-10-01 00:00:00+02:00", n, step_min=step_min)
 
-    frame = parse_day({"load_actual": doc(points)}, "load_actual", tz=TZ)
+    frame = parse_day({method: doc(points)}, method, tz=TZ)
 
     assert list(frame.columns) == ["timestamp", "load_mw"]
+    assert len(frame) == n
     assert frame["load_mw"].iloc[0] == 0.0
-    assert len(frame) == 96
-
-
-def test_load_forecast():
-    points = day_points("2025-10-01 00:00:00+02:00", 24, step_min=60)
-
-    frame = parse_day({"load_forecast": doc(points)}, "load_forecast", tz=TZ)
-
-    assert list(frame.columns) == ["timestamp", "load_mw"]
-    assert len(frame) == 24
-    assert frame["timestamp"].diff().iloc[1] == pd.Timedelta("60min")
+    assert frame["timestamp"].diff().iloc[1] == pd.Timedelta(delta)
 
 
 def test_generation_multiple_types():
@@ -75,8 +70,6 @@ def test_generation_multiple_types():
     ]
     assert frame["generation_mw"].tolist() == [0.0, 1.0, 0.0, 1.0]
 
-
-def test_generation_forecast_shapes():
     frame = parse_day(
         {
             "generation_forecast_day_ahead/solar": doc(
@@ -103,25 +96,24 @@ def test_null_values_dropped():
     assert len(frame) == 2
 
 
-def test_missing_doc_is_empty_with_columns():
-    frame = parse_day({}, "day_ahead_price", tz=TZ)
+@pytest.mark.parametrize(
+    ("raws", "method", "kwargs", "columns"),
+    [
+        ({}, "day_ahead_price", {}, ["timestamp", "price_eur_per_mwh", "sequence"]),
+        ({"load_actual": doc([])}, "load_actual", {}, ["timestamp", "load_mw"]),
+        (
+            {},
+            "generation_actual",
+            {"generation_types": ["solar"]},
+            ["timestamp", "generation_mw", "generation_type"],
+        ),
+    ],
+)
+def test_empty_gives_typed_empty(raws, method, kwargs, columns):
+    frame = parse_day(raws, method, **kwargs, tz=TZ)
 
     assert frame.empty
-    assert list(frame.columns) == ["timestamp", "price_eur_per_mwh", "sequence"]
-
-
-def test_empty_series_gives_empty_frame_with_columns():
-    frame = parse_day({"load_actual": doc([])}, "load_actual", tz=TZ)
-
-    assert frame.empty
-    assert list(frame.columns) == ["timestamp", "load_mw"]
-
-
-def test_generation_no_docs_is_empty_with_columns():
-    frame = parse_day({}, "generation_actual", generation_types=["solar"], tz=TZ)
-
-    assert frame.empty
-    assert list(frame.columns) == ["timestamp", "generation_mw", "generation_type"]
+    assert list(frame.columns) == columns
 
 
 def test_spring_forward_day_skips_hour_02():

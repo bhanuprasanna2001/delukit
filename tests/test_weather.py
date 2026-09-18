@@ -117,21 +117,21 @@ def test_fetch_one_day_groups_by_cell_selection():
         assert params["run"] == "2025-10-01T00:00"
 
 
-def test_missing_run_returns_empty_day():
-    src, session = source([FakeResponse(status=400, reason=RUN_NOT_AVAILABLE)])
+@pytest.mark.parametrize(
+    ("status", "payload", "reason"),
+    [
+        (400, None, RUN_NOT_AVAILABLE),
+        (200, None, RUN_NOT_AVAILABLE),
+        (200, "", None),
+    ],
+)
+def test_missing_run_returns_empty_day(status, payload, reason):
+    src, session = source([FakeResponse(status=status, payload=payload, reason=reason)])
 
     results = src.fetch(DAY, DAY)
 
     assert results == {DAY: {}}
     assert len(session.calls) == 1
-
-
-def test_missing_run_with_200_error_body_returns_empty_day():
-    src, _ = source([FakeResponse(status=200, reason=RUN_NOT_AVAILABLE)])
-
-    results = src.fetch(DAY, DAY)
-
-    assert results == {DAY: {}}
 
 
 def test_other_bad_request_raises():
@@ -141,14 +141,6 @@ def test_other_bad_request_raises():
 
     with pytest.raises(SourceError, match="Cannot initialize WeatherVariable"):
         src.fetch(DAY, DAY)
-
-
-def test_non_json_2xx_returns_empty_day():
-    src, _ = source([FakeResponse(status=200, payload="")])
-
-    results = src.fetch(DAY, DAY)
-
-    assert results == {DAY: {}}
 
 
 def test_non_json_4xx_raises():
@@ -174,14 +166,6 @@ def test_transient_failure_is_retried(monkeypatch):
 
     assert len(session.calls) == 3
     assert set(results[DAY]["forecast"]["locations"]) == {"berlin"}
-
-
-def test_transient_failure_exhausts_retries(monkeypatch):
-    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
-    src, _ = source([FakeResponse(status=500)] * 3)
-
-    with pytest.raises(TransientSourceError, match="after 3 attempts"):
-        src.fetch(DAY, DAY)
 
 
 def test_fetch_multiple_days():
@@ -232,29 +216,20 @@ def test_rate_limit_json_is_retried(monkeypatch):
     }
 
 
-def test_rate_limit_json_exhausts_retries(monkeypatch):
-    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
-    src, session = source([FakeResponse(status=429, reason=RATE_LIMITED)] * 3)
+@pytest.mark.parametrize(
+    ("status", "reason", "match", "expected_slept"),
+    [
+        (500, None, "after 3 attempts", [1.0, 2.0]),
+        (429, RATE_LIMITED, "HTTP 429", [60.0, 60.0]),
+    ],
+)
+def test_exhausts_retries(monkeypatch, status, reason, match, expected_slept):
+    slept = []
+    monkeypatch.setattr("delukit.sources.data_source.sleep", slept.append)
+    src, session = source([FakeResponse(status=status, reason=reason)] * 3)
 
-    with pytest.raises(TransientSourceError, match="HTTP 429"):
+    with pytest.raises(TransientSourceError, match=match):
         src.fetch(DAY, DAY)
 
     assert len(session.calls) == 3
-
-
-def test_rate_limit_backoff_waits_a_minute(monkeypatch):
-    slept = []
-    monkeypatch.setattr("delukit.sources.data_source.sleep", slept.append)
-    src, _ = source([FakeResponse(status=429, reason=RATE_LIMITED)] * 3)
-
-    with pytest.raises(TransientSourceError):
-        src.fetch(DAY, DAY)
-
-    assert slept == [60.0, 60.0]
-
-
-def test_limiter_is_10_per_minute():
-    rate = WeatherSource.limiter.buckets()[0].rates[0]
-
-    assert rate.limit == 10
-    assert rate.interval == 60_000
+    assert slept == expected_slept

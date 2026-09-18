@@ -145,16 +145,17 @@ def test_day_ahead_both_sequences():
     assert frame["price_eur_per_mwh"].tolist() == [1.0, 2.0, 3.0, 4.0]
 
 
-def test_day_ahead_missing_sequence():
-    raws = {"day_ahead_price/2": price_xml([3.0])}
-
+@pytest.mark.parametrize(
+    ("raws", "expected"),
+    [({"day_ahead_price/2": price_xml([3.0])}, [2]), ({}, [])],
+)
+def test_day_ahead_missing_or_empty(raws, expected):
     frame = parse_day(raws, "day_ahead_price", sequences=(1, 2), tz=TZ)
 
-    assert frame["sequence"].tolist() == [2]
-
-
-def test_day_ahead_no_docs_is_empty():
-    assert parse_day({}, "day_ahead_price", sequences=(1, 2), tz=TZ).empty
+    if not expected:
+        assert frame.empty
+    else:
+        assert frame["sequence"].tolist() == expected
 
 
 def test_dst_day_has_23_rows():
@@ -173,22 +174,17 @@ def test_dst_day_has_23_rows():
     assert "02" not in frame["timestamp"].dt.strftime("%H").tolist()
 
 
-def test_load_actual():
-    raws = {"load_actual": load_xml([12345, 12400])}
+@pytest.mark.parametrize(
+    ("method", "values"),
+    [("load_actual", [12345, 12400]), ("load_forecast", [13000, 13100])],
+)
+def test_load(method, values):
+    raws = {method: load_xml(values)}
 
-    frame = parse_day(raws, "load_actual", tz=TZ)
-
-    assert list(frame.columns) == ["timestamp", "load_mw"]
-    assert frame["load_mw"].tolist() == [12345.0, 12400.0]
-
-
-def test_load_forecast():
-    raws = {"load_forecast": load_xml([13000, 13100])}
-
-    frame = parse_day(raws, "load_forecast", tz=TZ)
+    frame = parse_day(raws, method, tz=TZ)
 
     assert list(frame.columns) == ["timestamp", "load_mw"]
-    assert frame["load_mw"].tolist() == [13000.0, 13100.0]
+    assert frame["load_mw"].tolist() == [float(v) for v in values]
 
 
 def test_generation_actual():

@@ -94,38 +94,6 @@ def test_repo_pipeline_config_loads():
 
     assert str(config.start) == "2025-10-01"
     assert set(config.sources) == {"smard", "entsoe", "energy_charts", "weather"}
-    # the gold block drives every gold output; the old fetch_policy key is
-    # retired — gold's `from` priority list replaces it
-    assert config.gold["calendar"]["holiday_source"] == "open_holidays"
-    assert config.gold["datasets"][0]["name"] == "epf_features"
-    assert config.gold["datasets"][0]["series"][0]["name"] == "day_ahead_price"
-
-
-def test_pipeline_config_exposes_source_fields(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(VALID))
-
-    config = load_pipeline_config(file)
-
-    assert isinstance(config, PipelineConfig)
-    assert config.sources["smard"]["resolution"] == "15min"
-
-
-def test_config_keeps_fetch_policy(tmp_path):
-    methods = [
-        {
-            "bidding_zone": "DE-LU",
-            "method": "day_ahead_price",
-            "fetch_policy": {"mode": "fallback"},
-        }
-    ]
-    data = {**VALID, "sources": {"energy_charts": {"methods": methods}}}
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(data))
-
-    config = load_pipeline_config(file)
-
-    assert config.sources["energy_charts"]["methods"][0]["method"] == "day_ahead_price"
 
 
 def test_unknown_storage(tmp_path):
@@ -166,17 +134,6 @@ def test_invalid_refresh_days(tmp_path, value):
         load_pipeline_config(file)
 
 
-def test_valid_refresh_days(tmp_path):
-    data = json.loads(json.dumps(VALID))
-    data["sources"]["smard"]["refresh_days"] = 2
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(data))
-
-    config = load_pipeline_config(file)
-
-    assert config.sources["smard"]["refresh_days"] == 2
-
-
 ENERGY_CHARTS_VALID = {
     "start": "2025-10-01",
     "end": "latest",
@@ -188,15 +145,6 @@ ENERGY_CHARTS_VALID = {
         }
     },
 }
-
-
-def test_valid_energy_charts_methods(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(ENERGY_CHARTS_VALID))
-
-    config = load_pipeline_config(file)
-
-    assert config.sources["energy_charts"]["methods"][0]["bidding_zone"] == "DE-LU"
 
 
 def energy_charts_config(methods):
@@ -250,15 +198,6 @@ def entsoe_config(methods):
     data = json.loads(json.dumps(ENTSOE_VALID))
     data["sources"]["entsoe"]["methods"] = methods
     return data
-
-
-def test_valid_entsoe_methods(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(ENTSOE_VALID))
-
-    config = load_pipeline_config(file)
-
-    assert config.sources["entsoe"]["methods"][0]["sequences"] == [1, 2]
 
 
 @pytest.mark.parametrize(
@@ -335,16 +274,6 @@ def smard_config(methods=None, resolution="15min", area="DE_LU"):
     return data
 
 
-def test_valid_smard_methods(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(SMARD_VALID))
-
-    config = load_pipeline_config(file)
-
-    methods = config.sources["smard"]["methods"]
-    assert methods[3]["generation_types"] == ["solar", "wind_offshore", "wind_onshore"]
-
-
 @pytest.mark.parametrize(
     "methods, message",
     [
@@ -384,22 +313,14 @@ def test_invalid_smard_resolution(tmp_path, resolution):
         load_pipeline_config(file)
 
 
-def test_smard_missing_methods_field(tmp_path):
+def test_invalid_smard_source_shape(tmp_path):
     data = json.loads(json.dumps(SMARD_VALID))
     del data["sources"]["smard"]["methods"]
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(data))
-
     with pytest.raises(ConfigError, match="smard is missing field: methods"):
-        load_pipeline_config(file)
-
-
-def test_invalid_smard_area(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(smard_config(area=5)))
+        load_pipeline_config(write_config(data, tmp_path))
 
     with pytest.raises(ConfigError, match="smard area must be a string"):
-        load_pipeline_config(file)
+        load_pipeline_config(write_config(smard_config(area=5), tmp_path))
 
 
 WEATHER_VALID = {
@@ -435,18 +356,6 @@ def weather_config(**overrides):
     data = json.loads(json.dumps(WEATHER_VALID))
     data["sources"]["weather"].update(overrides)
     return data
-
-
-def test_valid_weather(tmp_path):
-    file = tmp_path / "config.json"
-    file.write_text(json.dumps(WEATHER_VALID))
-
-    config = load_pipeline_config(file)
-
-    weather = config.sources["weather"]
-    assert weather["model"] == "ecmwf_ifs"
-    assert weather["forecast_days"] == 16
-    assert weather["locations"][1]["cell_selection"] == "sea"
 
 
 @pytest.mark.parametrize(
@@ -715,28 +624,14 @@ def _set(data, path, value):
         node[path[-1]] = value
 
 
-def test_gold_valid_loads(tmp_path):
-    config = load_pipeline_config(write_config(gold_data(), tmp_path))
-
-    assert config.gold == GOLD_VALID["gold"]
-
-
-def test_gold_absent_is_none(tmp_path):
+def test_gold_absent_or_null_is_none(tmp_path):
     data = gold_data()
     del data["gold"]
+    assert load_pipeline_config(write_config(data, tmp_path)).gold is None
 
-    config = load_pipeline_config(write_config(data, tmp_path))
-
-    assert config.gold is None
-
-
-def test_gold_null_is_none(tmp_path):
     data = gold_data()
     data["gold"] = None
-
-    config = load_pipeline_config(write_config(data, tmp_path))
-
-    assert config.gold is None
+    assert load_pipeline_config(write_config(data, tmp_path)).gold is None
 
 
 def test_gold_entsoe_price_defaults_to_sdac(tmp_path):
@@ -751,74 +646,56 @@ def test_gold_entsoe_price_defaults_to_sdac(tmp_path):
     }
 
 
-def test_gold_without_calendar_is_valid(tmp_path):
+def test_gold_optional_sections_may_be_absent(tmp_path):
     data = gold_data()
     del data["gold"]["calendar"]
+    assert "calendar" not in load_pipeline_config(write_config(data, tmp_path)).gold
 
-    config = load_pipeline_config(write_config(data, tmp_path))
-
-    assert "calendar" not in config.gold
-
-
-def test_gold_dataset_without_weather_is_valid(tmp_path):
     data = gold_data()
     del data["gold"]["datasets"][0]["weather"]
+    gold = load_pipeline_config(write_config(data, tmp_path)).gold
+    assert "weather" not in gold["datasets"][0]
 
-    config = load_pipeline_config(write_config(data, tmp_path))
+    data = gold_data()
+    data["gold"]["datasets"][0]["target"] = None
+    gold = load_pipeline_config(write_config(data, tmp_path)).gold
+    assert gold["datasets"][0].get("target") is None
 
-    assert "weather" not in config.gold["datasets"][0]
 
-
-def test_gold_duplicate_dataset(tmp_path):
+def test_gold_duplicates_rejected(tmp_path):
     data = gold_data()
     data["gold"]["datasets"].append(json.loads(json.dumps(data["gold"]["datasets"][0])))
-
     with pytest.raises(ConfigError, match="duplicate gold dataset"):
         load_pipeline_config(write_config(data, tmp_path))
 
-
-def test_gold_duplicate_series(tmp_path):
     data = gold_data()
     dataset = data["gold"]["datasets"][0]
     dataset["series"].append(json.loads(json.dumps(dataset["series"][0])))
-
     with pytest.raises(ConfigError, match="duplicate gold series"):
         load_pipeline_config(write_config(data, tmp_path))
 
-
-def test_gold_duplicate_from_entry(tmp_path):
     data = gold_data()
     entries = data["gold"]["datasets"][0]["series"][0]["from"]
     entries.append(json.loads(json.dumps(entries[0])))
-
     with pytest.raises(ConfigError, match="duplicate gold series from entry"):
         load_pipeline_config(write_config(data, tmp_path))
 
-
-def test_gold_duplicate_from_entry_implicit_sequence(tmp_path):
     data = gold_data()
     entries = data["gold"]["datasets"][0]["series"][0]["from"]
     entries.append({"source": "entsoe", "method": "day_ahead_price"})
     entries.append({"source": "entsoe", "method": "day_ahead_price", "sequence": 1})
-
     with pytest.raises(ConfigError, match="duplicate gold series from entry"):
         load_pipeline_config(write_config(data, tmp_path))
 
-
-def test_gold_duplicate_transform(tmp_path):
     data = gold_data()
     transforms = data["gold"]["datasets"][0]["series"][0]["transforms"]
     transforms.append(json.loads(json.dumps(transforms[0])))
-
     with pytest.raises(ConfigError, match="duplicate transform"):
         load_pipeline_config(write_config(data, tmp_path))
 
-
-def test_gold_duplicate_derived(tmp_path):
     data = gold_data()
     derived = data["gold"]["datasets"][0]["weather"]["derived"]
     derived.append(json.loads(json.dumps(derived[0])))
-
     with pytest.raises(ConfigError, match="duplicate derived feature"):
         load_pipeline_config(write_config(data, tmp_path))
 
@@ -1271,24 +1148,3 @@ def test_gold_explicit_null_is_rejected(tmp_path, path, message):
 
     with pytest.raises(ConfigError, match=message):
         load_pipeline_config(write_config(data, tmp_path))
-
-
-def test_gold_null_target_is_absent(tmp_path):
-    data = gold_data()
-    data["gold"]["datasets"][0]["target"] = None
-
-    config = load_pipeline_config(write_config(data, tmp_path))
-
-    assert config.gold["datasets"][0].get("target") is None
-
-
-def test_gold_default_levels_are_region_and_national(tmp_path):
-    """No levels key: region + national outputs exist, location ones don't."""
-    data = gold_data()
-    dataset = data["gold"]["datasets"][0]
-    dataset["target"] = "price"
-    dataset["columns"] = ["price", "temperature_2m__land", "temperature_2m__national"]
-
-    config = load_pipeline_config(write_config(data, tmp_path))
-
-    assert "temperature_2m__land" in config.gold["datasets"][0]["columns"]

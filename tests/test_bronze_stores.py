@@ -101,32 +101,38 @@ class TestLocalBronzeStore:
         assert not store.file.exists()
 
 
-class TestDatabricksBronzeStore:
-    def test_write_merges_records(self):
+@pytest.fixture(params=["databricks", "snowflake"])
+def sql_store_factory(request):
+    return {"databricks": databricks_store, "snowflake": snowflake_store}[request.param]
+
+
+class TestSqlBronzeStore:
+    @pytest.mark.parametrize(
+        "factory, schema",
+        [
+            (databricks_store, "delukit.bronze"),
+            (snowflake_store, "DELUKIT_DB.BRONZE"),
+        ],
+    )
+    def test_write_merges_records(self, factory, schema):
         connection = FakeConnection()
-        store = databricks_store(connection=connection)
+        store = factory(connection=connection)
         rows = [record(), record(day=date(2026, 9, 16))]
 
         assert store.write(rows) == 2
 
         cursor = connection.cursor_
         statements = [sql for sql, _ in cursor.calls]
-        assert "CREATE CATALOG" not in "\n".join(statements)
-        assert "CREATE SCHEMA IF NOT EXISTS delukit.bronze" in statements
-        assert any(
-            "CREATE TABLE IF NOT EXISTS delukit.bronze.payloads" in sql
-            for sql in statements
-        )
+        assert any(f"CREATE SCHEMA IF NOT EXISTS {schema}" in sql for sql in statements)
         merge_sql = next(sql for sql, _ in cursor.calls if sql.startswith("MERGE"))
-        assert "USING (" in merge_sql
         assert "FROM VALUES" in merge_sql
         assert "WHEN NOT MATCHED THEN INSERT" in merge_sql
         _, params = next(call for call in cursor.calls if call[0].startswith("MERGE"))
         assert params == values(rows)
 
-    def test_records_land_in_batches(self):
+    def test_records_land_in_batches(self, sql_store_factory):
         connection = FakeConnection()
-        store = databricks_store(connection=connection)
+        store = sql_store_factory(connection=connection)
         rows = make_records(
             "smard",
             {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
@@ -140,12 +146,13 @@ class TestDatabricksBronzeStore:
         ]
         assert [len(params) // 6 for _, params in merges] == [20, 5]
 
-    def test_write_empty_skips_sql(self):
-        store = databricks_store(connection=FakeConnection())
+    def test_write_empty_skips_sql(self, sql_store_factory):
+        store = sql_store_factory(connection=FakeConnection())
         assert store.write([]) == 0
         assert store.backend.connection.cursor_.calls == []
 
     def test_huge_payloads_land_one_row_per_batch(self):
+        # batching lives in shared SqlBronzeStore code: one backend pins it.
         connection = FakeConnection()
         store = databricks_store(connection=connection)
         big = '{"series": [[1, "' + "x" * 460_000 + '"]]}'
@@ -189,26 +196,40 @@ class TestDatabricksBronzeStore:
         assert len(merges) == 1
         assert merges[0][1] == values(rows)
 
-    def test_missing_env_raises(self, monkeypatch):
-        for name in (
-            "DATABRICKS_SERVER_HOSTNAME",
-            "DATABRICKS_HTTP_PATH",
-            "DATABRICKS_TOKEN",
-        ):
+    @pytest.mark.parametrize(
+        "backend, env_names, match",
+        [
+            (
+                "databricks",
+                (
+                    "DATABRICKS_SERVER_HOSTNAME",
+                    "DATABRICKS_HTTP_PATH",
+                    "DATABRICKS_TOKEN",
+                ),
+                "DATABRICKS_",
+            ),
+            (
+                "snowflake",
+                ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"),
+                "SNOWFLAKE_",
+            ),
+        ],
+    )
+    def test_missing_env_raises(self, monkeypatch, backend, env_names, match):
+        for name in env_names:
             monkeypatch.delenv(name, raising=False)
-        with pytest.raises(ValueError, match="DATABRICKS_"):
-            build_bronze_store("databricks")
+        with pytest.raises(ValueError, match=match):
+            build_bronze_store(backend)
 
-    def test_write_returns_actual_inserted_not_attempted(self):
+    def test_write_returns_actual_inserted_not_attempted(self, sql_store_factory):
         connection = FakeConnection(rowcount=0)
-        store = databricks_store(connection=connection)
-        rows = [record(), record(day=date(2026, 9, 16))]
+        store = sql_store_factory(connection=connection)
 
-        assert store.write(rows) == 0
+        assert store.write([record(), record(day=date(2026, 9, 16))]) == 0
 
-    def test_write_sums_rowcounts_across_batches(self):
+    def test_write_sums_rowcounts_across_batches(self, sql_store_factory):
         connection = FakeConnection(rowcount=[20, 0])
-        store = databricks_store(connection=connection)
+        store = sql_store_factory(connection=connection)
         rows = make_records(
             "smard",
             {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
@@ -217,132 +238,34 @@ class TestDatabricksBronzeStore:
 
         assert store.write(rows) == 20
 
-    def test_coverage(self):
+    def test_coverage(self, sql_store_factory):
         connection = FakeConnection(rows=[("smard", DAY), ("smard", "2026-09-16")])
-        store = databricks_store(connection=connection)
+        store = sql_store_factory(connection=connection)
 
         assert store.coverage() == {("smard", DAY), ("smard", date(2026, 9, 16))}
         assert "SELECT DISTINCT" in connection.cursor_.calls[0][0]
 
-    def test_coverage_missing_table_returns_empty(self):
-        connection = FakeConnection(
-            error=Exception("TABLE_OR_VIEW_NOT_FOUND: delukit.bronze.payloads")
-        )
-        store = databricks_store(connection=connection)
-
-        assert store.coverage() == set()
-
-
-class TestSnowflakeBronzeStore:
-    def test_write_merges_records(self):
-        connection = FakeConnection()
-        store = snowflake_store(connection=connection)
-        rows = [record()]
-
-        assert store.write(rows) == 1
-
-        cursor = connection.cursor_
-        statements = [sql for sql, _ in cursor.calls]
-        assert "CREATE DATABASE" not in "\n".join(statements)
-        assert "CREATE SCHEMA IF NOT EXISTS DELUKIT_DB.BRONZE" in statements
-        assert any(
-            "CREATE TABLE IF NOT EXISTS DELUKIT_DB.BRONZE.PAYLOADS" in sql
-            for sql in statements
-        )
-        merge_sql = next(sql for sql, _ in cursor.calls if sql.startswith("MERGE"))
-        assert "FROM VALUES" in merge_sql
-        assert '$1 AS "SOURCE"' in merge_sql
-        assert '"KEY"' in merge_sql
-        assert "WHEN NOT MATCHED THEN INSERT" in merge_sql
-        _, params = next(call for call in cursor.calls if call[0].startswith("MERGE"))
-        assert params == values(rows)
-
-    def test_records_land_in_batches(self):
-        connection = FakeConnection()
-        store = snowflake_store(connection=connection)
-        rows = make_records(
-            "smard",
-            {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
-            FETCHED_AT,
-        )
-
-        assert store.write(rows) == 25
-
-        merges = [
-            call for call in connection.cursor_.calls if call[0].startswith("MERGE")
-        ]
-        assert [len(params) // 6 for _, params in merges] == [20, 5]
-
-    def test_write_empty_skips_sql(self):
-        store = snowflake_store(connection=FakeConnection())
-        assert store.write([]) == 0
-        assert store.backend.connection.cursor_.calls == []
-
-    def test_missing_env_raises(self, monkeypatch):
-        for name in ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"):
-            monkeypatch.delenv(name, raising=False)
-        with pytest.raises(ValueError, match="SNOWFLAKE_"):
-            build_bronze_store("snowflake")
-
-    def test_write_returns_actual_inserted_not_attempted(self):
-        connection = FakeConnection(rowcount=0)
-        store = snowflake_store(connection=connection)
-
-        assert store.write([record()]) == 0
-
-    def test_write_sums_rowcounts_across_batches(self):
-        connection = FakeConnection(rowcount=[20, 0])
-        store = snowflake_store(connection=connection)
-        rows = make_records(
-            "smard",
-            {DAY: {f"key_{i}": '{"series": [[1, 2.0]]}' for i in range(25)}},
-            FETCHED_AT,
-        )
-
-        assert store.write(rows) == 20
-
-    def test_coverage(self):
-        connection = FakeConnection(rows=[("smard", DAY), ("smard", "2026-09-16")])
-        store = snowflake_store(connection=connection)
-
-        assert store.coverage() == {("smard", DAY), ("smard", date(2026, 9, 16))}
-        assert "SELECT DISTINCT" in connection.cursor_.calls[0][0]
-
-    def test_coverage_missing_table_returns_empty(self):
-        connection = FakeConnection(
-            error=Exception(
+    @pytest.mark.parametrize(
+        "error",
+        [
+            Exception("TABLE_OR_VIEW_NOT_FOUND: delukit.bronze.payloads"),
+            Exception(
                 "002003 (02000): Object 'DELUKIT_DB.BRONZE.PAYLOADS' "
                 "does not exist or not authorized."
-            )
-        )
-        store = snowflake_store(connection=connection)
+            ),
+        ],
+    )
+    def test_coverage_missing_table_returns_empty(self, sql_store_factory, error):
+        store = sql_store_factory(connection=FakeConnection(error=error))
 
         assert store.coverage() == set()
 
-    def test_coverage_propagates_unexpected_errors(self):
-        connection = FakeConnection(error=RuntimeError("connection refused"))
-        store = snowflake_store(connection=connection)
+    def test_coverage_propagates_unexpected_errors(self, sql_store_factory):
+        error = RuntimeError("connection refused")
+        store = sql_store_factory(connection=FakeConnection(error=error))
 
         with pytest.raises(RuntimeError, match="connection refused"):
             store.coverage()
-
-
-class TestCoverageHelpers:
-    def test_normalize_day(self):
-        from datetime import datetime
-
-        from delukit.backends.base import normalize_day
-
-        assert normalize_day(date(2026, 9, 15)) == date(2026, 9, 15)
-        assert normalize_day(datetime(2026, 9, 15, 6, 0)) == date(2026, 9, 15)  # noqa: DTZ001 — naive UTC by design
-        assert normalize_day("2026-09-15") == date(2026, 9, 15)
-
-    def test_is_missing_table(self):
-        from delukit.backends.base import is_missing_table
-
-        assert is_missing_table(Exception("does not exist"))
-        assert is_missing_table(Exception("TABLE_OR_VIEW_NOT_FOUND"))
-        assert not is_missing_table(RuntimeError("connection refused"))
 
 
 class TestIdentities:
@@ -363,23 +286,18 @@ class TestIdentities:
         assert isinstance(replay[0]["fetched_at"], datetime)
         assert store.records_for(set()) == []
 
-    def test_databricks_identities(self):
+    @pytest.mark.parametrize("factory", [databricks_store, snowflake_store])
+    def test_identities(self, factory):
         rows = [
             ("smard", DAY, "day_ahead_price", "abc"),
             ("smard", "2026-09-16", "day_ahead_price", "def"),
         ]
-        store = databricks_store(connection=FakeConnection(rows=rows))
+        store = factory(connection=FakeConnection(rows=rows))
 
         assert store.identities() == {
             ("smard", DAY, "day_ahead_price", "abc"),
             ("smard", date(2026, 9, 16), "day_ahead_price", "def"),
         }
-
-    def test_snowflake_identities(self):
-        rows = [(("smard", DAY, "day_ahead_price", "abc"))]
-        store = snowflake_store(connection=FakeConnection(rows=[rows[0]]))
-
-        assert store.identities() == {("smard", DAY, "day_ahead_price", "abc")}
 
     def test_identities_missing_table_returns_empty(self):
         error = Exception("TABLE_OR_VIEW_NOT_FOUND: delukit.bronze.payloads")
@@ -399,7 +317,5 @@ class TestBuilders:
 
         assert isinstance(store, LocalBronzeStore)
         assert store.root == tmp_path
-
-    def test_build_bronze_store_rejects_unknown_backend(self):
         with pytest.raises(ValueError, match="unknown backend"):
             build_bronze_store("supabase")

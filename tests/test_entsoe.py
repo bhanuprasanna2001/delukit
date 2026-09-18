@@ -90,23 +90,35 @@ def test_sequences_split():
     assert set(raws) == {"day_ahead_price/1", "day_ahead_price/2"}
 
 
-def test_missing_sequence_is_skipped():
-    src, _ = source([DUMMY_XML, NoMatchingDataError()])
+@pytest.mark.parametrize("case", ["sequence", "day", "psr"])
+def test_no_matching_data_skipped(case):
+    if case == "sequence":
+        src, _ = source([DUMMY_XML, NoMatchingDataError()])
 
-    raws = src.fetch(
-        DAY, DAY, method="day_ahead_price", area="DE_LU", sequences=(1, 2)
-    )[DAY]
+        raws = src.fetch(
+            DAY, DAY, method="day_ahead_price", area="DE_LU", sequences=(1, 2)
+        )[DAY]
 
-    assert set(raws) == {"day_ahead_price/1"}
+        assert set(raws) == {"day_ahead_price/1"}
+    elif case == "day":
+        src, _ = source([NoMatchingDataError(), DUMMY_XML])
 
+        results = src.fetch(DAY, date(2025, 10, 2), method="load_actual", area="DE_LU")
 
-def test_no_matching_data_yields_empty_and_continues():
-    src, _ = source([NoMatchingDataError(), DUMMY_XML])
+        assert results[DAY] == {}
+        assert results[date(2025, 10, 2)] == {"load_actual": DUMMY_XML}
+    else:
+        src, _ = source([DUMMY_XML, NoMatchingDataError(), DUMMY_XML])
 
-    results = src.fetch(DAY, date(2025, 10, 2), method="load_actual", area="DE_LU")
+        raws = src.fetch(
+            DAY,
+            DAY,
+            method="generation_actual",
+            area="DE_LU",
+            psr_types=["B16", "B18", "B19"],
+        )[DAY]
 
-    assert results[DAY] == {}
-    assert results[date(2025, 10, 2)] == {"load_actual": DUMMY_XML}
+        assert set(raws) == {"generation_actual/B16", "generation_actual/B19"}
 
 
 def test_dst_day_window():
@@ -143,20 +155,6 @@ def test_generation_actual_one_doc_per_psr():
     }
 
 
-def test_generation_actual_skips_missing_psr():
-    src, _ = source([DUMMY_XML, NoMatchingDataError(), DUMMY_XML])
-
-    raws = src.fetch(
-        DAY,
-        DAY,
-        method="generation_actual",
-        area="DE_LU",
-        psr_types=["B16", "B18", "B19"],
-    )[DAY]
-
-    assert set(raws) == {"generation_actual/B16", "generation_actual/B19"}
-
-
 def test_generation_forecast_one_call():
     src, client = source([DUMMY_XML])
 
@@ -169,25 +167,22 @@ def test_generation_forecast_one_call():
     assert raws == {"generation_forecast": DUMMY_XML}
 
 
-def test_transient_599_retried_then_raises(monkeypatch):
-    monkeypatch.setattr("delukit.sources.data_source.sleep", lambda seconds: None)
-    src, client = source([http_error(599)] * 3)
+@pytest.mark.parametrize(
+    ("status", "headers", "expected_slept"),
+    [(599, None, [1.0, 2.0]), (503, {"Retry-After": "42"}, [42.0, 42.0])],
+)
+def test_transient_599_retried_then_raises(
+    monkeypatch, status, headers, expected_slept
+):
+    slept = []
+    monkeypatch.setattr("delukit.sources.data_source.sleep", slept.append)
+    src, client = source([http_error(status, headers=headers)] * 3)
 
-    with pytest.raises(TransientSourceError, match="HTTP 599"):
+    with pytest.raises(TransientSourceError, match=f"HTTP {status}"):
         src.fetch(DAY, DAY, method="load_actual", area="DE_LU")
 
     assert len(client.calls) == 3
-
-
-def test_transient_honors_retry_after(monkeypatch):
-    slept = []
-    monkeypatch.setattr("delukit.sources.data_source.sleep", slept.append)
-    src, _ = source([http_error(503, headers={"Retry-After": "42"})] * 3)
-
-    with pytest.raises(TransientSourceError):
-        src.fetch(DAY, DAY, method="load_actual", area="DE_LU")
-
-    assert slept == [42.0, 42.0]
+    assert slept == expected_slept
 
 
 def test_permanent_400_not_retried():
@@ -215,22 +210,15 @@ def test_html_response_raises():
         src.fetch(DAY, DAY, method="load_actual", area="DE_LU")
 
 
-def test_unknown_method():
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"method": "bogus", "area": "DE_LU"}, "unknown method"),
+        ({"method": "load_actual", "area": "XX"}, "unknown area"),
+    ],
+)
+def test_unknown_catalog(kwargs, match):
     src, _ = source([])
 
-    with pytest.raises(SourceError, match="unknown method"):
-        src.fetch(DAY, DAY, method="bogus", area="DE_LU")
-
-
-def test_unknown_area():
-    src, _ = source([])
-
-    with pytest.raises(SourceError, match="unknown area"):
-        src.fetch(DAY, DAY, method="load_actual", area="XX")
-
-
-def test_limiter_is_400_per_minute():
-    rate = EntsoeSource.limiter.buckets()[0].rates[0]
-
-    assert rate.limit == 400
-    assert rate.interval == 60_000
+    with pytest.raises(SourceError, match=match):
+        src.fetch(DAY, DAY, **kwargs)

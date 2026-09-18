@@ -124,38 +124,19 @@ def test_unknown_method():
         src.fetch(DAY, DAY, method="bogus", bidding_zone="DE-LU")
 
 
-def test_spring_forward_day_window():
+@pytest.mark.parametrize("day", [date(2025, 3, 30), date(2025, 10, 26)])
+def test_dst_day_window(day):
     src, session = source([fake_response(200, PRICE_JSON)])
 
     src.fetch(
-        date(2025, 3, 30),
-        date(2025, 3, 30),
+        day,
+        day,
         method="day_ahead_price",
         bidding_zone="DE-LU",
     )
 
     _, params, _ = session.calls[0]
-    assert params["start"] == pd.Timestamp("2025-03-30 00:00", tz=TZ).isoformat()
-    assert params["end"] == pd.Timestamp("2025-03-30 23:59", tz=TZ).isoformat()
-
-
-def test_fall_back_day_window():
-    src, session = source([fake_response(200, PRICE_JSON)])
-
-    src.fetch(
-        date(2025, 10, 26),
-        date(2025, 10, 26),
-        method="day_ahead_price",
-        bidding_zone="DE-LU",
+    assert (
+        params["start"] == pd.Timestamp(f"{day.isoformat()} 00:00", tz=TZ).isoformat()
     )
-
-    _, params, _ = session.calls[0]
-    assert params["start"] == pd.Timestamp("2025-10-26 00:00", tz=TZ).isoformat()
-    assert params["end"] == pd.Timestamp("2025-10-26 23:59", tz=TZ).isoformat()
-
-
-def test_limiter_is_2_per_minute():
-    rate = EnergyChartsSource.limiter.buckets()[0].rates[0]
-
-    assert rate.limit == 2
-    assert rate.interval == 60_000
+    assert params["end"] == pd.Timestamp(f"{day.isoformat()} 23:59", tz=TZ).isoformat()

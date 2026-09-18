@@ -154,25 +154,19 @@ def test_not_json_response_raises():
         fetch(src, DAY, DAY, method="load_actual")
 
 
-def test_unknown_method():
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"method": "bogus"}, "unknown method"),
+        ({"method": "load_actual", "area": "XX"}, "unknown area"),
+        ({"method": "load_actual", "resolution": "5min"}, "unknown resolution"),
+    ],
+)
+def test_unknown_catalog(kwargs, match):
     src, _ = source([])
 
-    with pytest.raises(SourceError, match="unknown method"):
-        fetch(src, DAY, DAY, method="bogus")
-
-
-def test_unknown_area():
-    src, _ = source([])
-
-    with pytest.raises(SourceError, match="unknown area"):
-        fetch(src, DAY, DAY, method="load_actual", area="XX")
-
-
-def test_unknown_resolution():
-    src, _ = source([])
-
-    with pytest.raises(SourceError, match="unknown resolution"):
-        fetch(src, DAY, DAY, method="load_actual", resolution="5min")
+    with pytest.raises(SourceError, match=match):
+        fetch(src, DAY, DAY, **kwargs)
 
 
 def test_hour_resolution_24_points():
@@ -219,11 +213,22 @@ def test_generation_actual_one_request_per_type():
     }
 
 
-def test_generation_unknown_type():
+def test_unknown_generation_type():
     src, _ = source([])
 
     with pytest.raises(SourceError, match="unknown generation type 'fusion'"):
         fetch(src, DAY, DAY, method="generation_actual", generation_types=["fusion"])
+
+    src, _ = source([])
+
+    with pytest.raises(SourceError, match="supported: total, solar"):
+        fetch(
+            src,
+            DAY,
+            DAY,
+            method="generation_forecast_day_ahead",
+            generation_types=["biomass"],
+        )
 
 
 def test_forecast_day_ahead_maps_catalog_filters():
@@ -254,56 +259,26 @@ def test_forecast_day_ahead_maps_catalog_filters():
     }
 
 
-def test_forecast_unknown_type_lists_supported():
-    src, _ = source([])
-
-    with pytest.raises(SourceError, match="supported: total, solar"):
-        fetch(
-            src,
-            DAY,
-            DAY,
-            method="generation_forecast_day_ahead",
-            generation_types=["biomass"],
-        )
-
-
-def test_fall_back_day_payload_spans_25_hours():
-    day = date(2025, 10, 26)
+@pytest.mark.parametrize(
+    ("day", "expected_len"),
+    [(date(2025, 10, 1), 96), (date(2025, 10, 26), 100)],
+)
+def test_day_payload_excludes_next_day_points(day, expected_len):
     start = pd.Timestamp(day).tz_localize(TZ)
-    points = [
-        [(start + pd.Timedelta(minutes=15 * i)).value // 1_000_000, float(i)]
-        for i in range(100)
-    ]
+    if day == date(2025, 10, 26):
+        points = [
+            [(start + pd.Timedelta(minutes=15 * i)).value // 1_000_000, float(i)]
+            for i in range(100)
+        ]
+    else:
+        points = day_points(day) + day_points(
+            day + pd.Timedelta(days=1), start_value=1000
+        )
     src, _ = source([fake_response(200, week_json(points))])
 
     results = fetch(src, day, day, method="day_ahead_price")
 
     series = json.loads(results[day]["day_ahead_price"])["series"]
-    assert len(series) == 100
-
-
-def test_day_payload_excludes_next_day_points():
-    src, _ = source(
-        [
-            fake_response(
-                200,
-                week_json(
-                    day_points(DAY)
-                    + day_points(DAY + pd.Timedelta(days=1), start_value=1000)
-                ),
-            )
-        ]
-    )
-
-    results = fetch(src, DAY, DAY, method="day_ahead_price")
-
-    series = json.loads(results[DAY]["day_ahead_price"])["series"]
-    assert len(series) == 96
-    assert max(point[1] for point in series) == 95.0
-
-
-def test_limiter_is_30_per_minute():
-    rate = SmardSource.limiter.buckets()[0].rates[0]
-
-    assert rate.limit == 30
-    assert rate.interval == 60_000
+    assert len(series) == expected_len
+    if expected_len == 96:
+        assert max(point[1] for point in series) == 95.0

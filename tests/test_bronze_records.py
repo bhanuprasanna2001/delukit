@@ -28,22 +28,15 @@ def test_one_row_per_day_and_key():
     assert {row["key"] for row in rows} == {"day_ahead_price/1", "day_ahead_price/2"}
 
 
-def test_payload_preserved_byte_for_byte():
+def test_payload_passthrough():
     text = "<GL_MarketDocument>\n  <TimeSeries>...</TimeSeries>\n</GL_MarketDocument>"
     rows = make_records("entsoe", {DAY: {"load_actual": text}}, FETCHED_AT)
-
     assert rows[0]["payload"] == text
 
+    raw = {"run": "2026-09-16T00:00", "locations": {"berlin": {"hourly": {}}}}
+    rows = make_records("weather", {DAY: {"forecast": raw}}, FETCHED_AT)
+    assert json.loads(rows[0]["payload"]) == raw
 
-def test_dict_payload_serialized_to_json():
-    payload = {"run": "2026-09-16T00:00", "locations": {"berlin": {"hourly": {}}}}
-    rows = make_records("weather", {DAY: {"forecast": payload}}, FETCHED_AT)
-
-    assert json.loads(rows[0]["payload"]) == payload
-
-
-def test_hash_matches_semantic_hash():
-    text = '{"series": [[1, 2.0]]}'
-    rows = make_records("smard", {DAY: {"day_ahead_price": text}}, FETCHED_AT)
-
-    assert rows[0]["payload_hash"] == semantic_hash("smard", text)
+    payload = '{"series": [[1, 2.0]]}'
+    rows = make_records("smard", {DAY: {"day_ahead_price": payload}}, FETCHED_AT)
+    assert rows[0]["payload_hash"] == semantic_hash("smard", payload)
