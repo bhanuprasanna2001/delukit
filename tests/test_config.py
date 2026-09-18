@@ -89,7 +89,7 @@ def test_unknown_source(tmp_path):
 
 
 def test_repo_raw_config_loads():
-    path = Path(__file__).parents[1] / "configs" / "raw.json"
+    path = Path(__file__).parents[1] / "configs" / "data.json"
     config = load_raw_config(path)
 
     assert str(config.start) == "2025-10-01"

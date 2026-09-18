@@ -20,5 +20,5 @@ Raw ingest (APIs → bronze):
 
 ```bash
 uv sync
-uv run delukit configs/raw.json
+uv run delukit configs/data.json
 ```

@@ -12,7 +12,11 @@ def test_repo_data_config_loads():
 
     assert set(config.sources) == {"smard", "entsoe", "energy_charts", "weather"}
     assert config.storages == ["local", "databricks"]
-    assert "fetch_policy" not in json.dumps(config.sources["energy_charts"])
+    # policy rides along for gold; silver ignores it (see test_data_config_ignores_fetch_policy)
+    assert (
+        config.sources["energy_charts"]["methods"][0]["fetch_policy"]["mode"]
+        == "fallback"
+    )
 
 
 def test_data_config_reuses_raw_validation(tmp_path):

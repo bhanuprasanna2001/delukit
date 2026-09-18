@@ -53,7 +53,16 @@
             "methods": [
                 {
                     "bidding_zone": "DE-LU",
-                    "method": "day_ahead_price"
+                    "method": "day_ahead_price",
+                    "fetch_policy": {
+                        "mode": "fallback",
+                        "fallback_for": {
+                            "source": "entsoe",
+                            "area": "DE_LU",
+                            "method": "day_ahead_price"
+                        },
+                        "when": "missing_intervals"
+                    }
                 }
             ]
         },
