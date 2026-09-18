@@ -11,8 +11,14 @@ One day's raw documents (dict keyed by call key) in, one clean frame out:
 
 from __future__ import annotations
 
+import warnings
+
 import pandas as pd
+from bs4 import XMLParsedAsHTMLWarning
 from entsoe.parsers import PSRTYPE_MAPPINGS, parse_generation, parse_loads, parse_prices
+
+# entsoe-py parses XML with html.parser (upstream issue #180); silence that noise.
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 _DESCRIPTION_TO_CODE = {name: code for code, name in PSRTYPE_MAPPINGS.items()}
 

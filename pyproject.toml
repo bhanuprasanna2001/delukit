@@ -31,3 +31,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.7",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::bs4.XMLParsedAsHTMLWarning",
+]
