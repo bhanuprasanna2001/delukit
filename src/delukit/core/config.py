@@ -34,6 +34,31 @@ class RawConfig:
         )
 
 
+@dataclass(frozen=True)
+class DataConfig:
+    """Silver config: same sources shape as raw; fetch_policy (if present)
+    is ignored — source fallback is gold's job, silver keeps every source."""
+
+    start: date | str
+    end: date | str
+    timezone: str
+    storages: list[str]
+    sources: dict[str, dict]
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> DataConfig:
+        raw = _read(path)
+        data = _parse(raw, path)
+        _validate(data)
+        return cls(
+            start=data["start"],
+            end=data["end"],
+            timezone=data["timezone"],
+            storages=data["storages"],
+            sources=data["sources"],
+        )
+
+
 _KNOWN_SOURCES = {
     "smard": ["area", "resolution", "methods"],
     "entsoe": ["methods"],
@@ -318,3 +343,7 @@ def _validate_weather(source: object) -> None:
 
 def load_raw_config(path: str | Path) -> RawConfig:
     return RawConfig.from_file(path)
+
+
+def load_data_config(path: str | Path) -> DataConfig:
+    return DataConfig.from_file(path)

@@ -1,6 +1,6 @@
 """delukit: German energy data pipeline.
 
-Usage: delukit [raw|sync] [config_path]   (default: raw configs/raw.json)
+Usage: delukit [raw|sync|data] [config_path]   (default: configs/data.json)
 
 Library:
     import delukit
@@ -83,9 +83,15 @@ def main() -> None:
 
     setup_logging()
     args = sys.argv[1:]
-    if args and args[0] in ("raw", "sync"):
+    if args and args[0] in ("raw", "sync", "data"):
         command, args = args[0], args[1:]
     else:
         command = "raw"
-    path = args[0] if args else "configs/raw.json"
-    (sync if command == "sync" else run)(path)
+    if command == "data":
+        from delukit.pipelines.data import run as run_data
+
+        path = args[0] if args else "configs/data.json"
+        run_data(path)
+    else:
+        path = args[0] if args else "configs/data.json"
+        (sync if command == "sync" else run)(path)

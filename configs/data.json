@@ -1,0 +1,264 @@
+{
+    "start": "2025-10-01",
+    "end": "latest",
+    "timezone": "Europe/Berlin",
+    "storages": [
+        "local",
+        "databricks"
+    ],
+    "sources": {
+        "smard": {
+            "area": "DE_LU",
+            "resolution": "15min",
+            "refresh_days": 7,
+            "methods": [
+                {
+                    "method": "day_ahead_price"
+                },
+                {
+                    "method": "load_actual"
+                },
+                {
+                    "method": "load_forecast"
+                },
+                {
+                    "method": "generation_actual",
+                    "generation_types": [
+                        "biomass",
+                        "gas",
+                        "hard_coal",
+                        "hydro",
+                        "lignite",
+                        "nuclear",
+                        "other_conventional",
+                        "other_renewables",
+                        "pumped_storage",
+                        "solar",
+                        "wind_offshore",
+                        "wind_onshore"
+                    ]
+                },
+                {
+                    "method": "generation_forecast_day_ahead",
+                    "generation_types": [
+                        "solar",
+                        "wind_offshore",
+                        "wind_onshore"
+                    ]
+                }
+            ]
+        },
+        "energy_charts": {
+            "refresh_days": 7,
+            "methods": [
+                {
+                    "bidding_zone": "DE-LU",
+                    "method": "day_ahead_price"
+                }
+            ]
+        },
+        "entsoe": {
+            "refresh_days": 7,
+            "methods": [
+                {
+                    "area": "DE_LU",
+                    "method": "day_ahead_price",
+                    "sequences": [
+                        1,
+                        2
+                    ]
+                },
+                {
+                    "area": "DE_LU",
+                    "method": "load_actual"
+                },
+                {
+                    "area": "DE_LU",
+                    "method": "load_forecast"
+                },
+                {
+                    "area": "DE_LU",
+                    "method": "generation_actual",
+                    "psr_types": [
+                        "B16",
+                        "B18",
+                        "B19"
+                    ]
+                },
+                {
+                    "area": "DE_LU",
+                    "method": "generation_forecast",
+                    "psr_types": [
+                        "B16",
+                        "B18",
+                        "B19"
+                    ]
+                }
+            ]
+        },
+        "weather": {
+            "model": "ecmwf_ifs",
+            "forecast_days": 16,
+            "refresh_days": 3,
+            "fields": [
+                "temperature_2m",
+                "wind_speed_100m",
+                "wind_direction_100m",
+                "shortwave_radiation",
+                "cloud_cover"
+            ],
+            "locations": [
+                {
+                    "name": "emden",
+                    "latitude": 53.37,
+                    "longitude": 7.21,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "bremen",
+                    "latitude": 53.08,
+                    "longitude": 8.80,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "hamburg",
+                    "latitude": 53.55,
+                    "longitude": 9.99,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "kiel",
+                    "latitude": 54.32,
+                    "longitude": 10.14,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "rostock",
+                    "latitude": 54.09,
+                    "longitude": 12.14,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "hanover",
+                    "latitude": 52.38,
+                    "longitude": 9.73,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "berlin",
+                    "latitude": 52.52,
+                    "longitude": 13.41,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "muenster",
+                    "latitude": 51.96,
+                    "longitude": 7.63,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "kassel",
+                    "latitude": 51.31,
+                    "longitude": 9.50,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "leipzig",
+                    "latitude": 51.34,
+                    "longitude": 12.37,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "dresden",
+                    "latitude": 51.05,
+                    "longitude": 13.74,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "cologne",
+                    "latitude": 50.94,
+                    "longitude": 6.96,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "frankfurt",
+                    "latitude": 50.11,
+                    "longitude": 8.68,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "erfurt",
+                    "latitude": 50.98,
+                    "longitude": 11.03,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "nuremberg",
+                    "latitude": 49.45,
+                    "longitude": 11.08,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "luxembourg",
+                    "latitude": 49.61,
+                    "longitude": 6.13,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "stuttgart",
+                    "latitude": 48.78,
+                    "longitude": 9.18,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "freiburg",
+                    "latitude": 47.99,
+                    "longitude": 7.85,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "munich",
+                    "latitude": 48.14,
+                    "longitude": 11.58,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "passau",
+                    "latitude": 48.57,
+                    "longitude": 13.46,
+                    "cell_selection": "land"
+                },
+                {
+                    "name": "north_sea_west",
+                    "latitude": 54.75,
+                    "longitude": 6.30,
+                    "cell_selection": "sea"
+                },
+                {
+                    "name": "north_sea_centre",
+                    "latitude": 54.60,
+                    "longitude": 7.50,
+                    "cell_selection": "sea"
+                },
+                {
+                    "name": "north_sea_east",
+                    "latitude": 54.40,
+                    "longitude": 8.40,
+                    "cell_selection": "sea"
+                },
+                {
+                    "name": "baltic_west",
+                    "latitude": 54.50,
+                    "longitude": 11.30,
+                    "cell_selection": "sea"
+                },
+                {
+                    "name": "baltic_east",
+                    "latitude": 54.50,
+                    "longitude": 13.50,
+                    "cell_selection": "sea"
+                }
+            ]
+        }
+    }
+}
