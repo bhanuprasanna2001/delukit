@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 
 from delukit.layers.bronze.store import LocalBronzeStore
-from delukit.pipelines.raw import PipelineError, run
+from delukit.pipelines import PipelineError
+from delukit.pipelines.bronze import run
 from delukit.sources.data_source import SourceError
 
 TODAY = date(2026, 9, 16)
@@ -95,20 +96,20 @@ def write_config(tmp_path, **overrides):
         "sources": {"smard": SMARD_CONFIG},
     }
     data.update(overrides)
-    path = tmp_path / "raw.json"
+    path = tmp_path / "bronze.json"
     path.write_text(json.dumps(data))
     return path
 
 
 def patch(monkeypatch, sources, store_map):
     monkeypatch.setattr(
-        "delukit.pipelines.raw.build_source",
+        "delukit.pipelines.bronze.build_source",
         lambda name, config, tz: sources[name],
     )
     monkeypatch.setattr(
-        "delukit.pipelines.raw.build_bronze_store", lambda name: store_map[name]
+        "delukit.pipelines.bronze.build_bronze_store", lambda name: store_map[name]
     )
-    monkeypatch.setattr("delukit.pipelines.raw._today", lambda tz: TODAY)
+    monkeypatch.setattr("delukit.pipelines._today", lambda tz: TODAY)
 
 
 def seed(store, source, day, payload=SMARD_PAYLOAD, key="day_ahead_price"):
@@ -331,7 +332,7 @@ def test_prefers_local_anchor_when_present(monkeypatch, tmp_path):
 
 
 def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
-    from delukit.pipelines.raw import sync
+    from delukit.pipelines.bronze import sync
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})
@@ -353,7 +354,7 @@ def test_failed_remote_heals_on_sync(monkeypatch, tmp_path):
 
 
 def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
-    from delukit.pipelines.raw import sync
+    from delukit.pipelines.bronze import sync
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     old = TODAY - timedelta(days=30)
@@ -373,7 +374,7 @@ def test_sync_heals_hole_outside_refresh_window(monkeypatch, tmp_path):
 
 
 def test_revised_payload_syncs_new_version_only(monkeypatch, tmp_path):
-    from delukit.pipelines.raw import sync
+    from delukit.pipelines.bronze import sync
 
     path = write_config(tmp_path, storages=["local", "databricks"])
     smard = FakeSource(raws={TODAY: {"day_ahead_price": SMARD_PAYLOAD}})

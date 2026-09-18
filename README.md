@@ -1,8 +1,8 @@
 # delukit
 
 German energy data pipeline: day-ahead prices, load, generation, and weather
-forecasts — from raw APIs into versioned bronze storage, with clean silver
-parsers already built and a point-in-time feature layer planned next.
+forecasts — from raw APIs into versioned bronze storage, clean silver
+tables, and a point-in-time gold feature layer planned next.
 
 Sources: SMARD, ENTSO-E, Energy-Charts, Open-Meteo (ECMWF IFS).
 
@@ -16,9 +16,21 @@ delukit.fetch(
 )
 ```
 
-Raw ingest (APIs → bronze):
+Run the whole pipeline (APIs → bronze → silver), or one stage:
 
 ```bash
 uv sync
-uv run delukit configs/data.json
+uv run delukit                     # all stages, configs/pipeline.json
+uv run delukit bronze              # fetch APIs into bronze stores
+uv run delukit silver              # parse bronze into silver tables
+uv run delukit sync                # replay local bronze into remotes
 ```
+
+## Layout
+
+    sources/     API clients, one folder per provider
+    layers/      storage per medallion layer: bronze, silver, gold
+    transforms/  pure silver-to-gold computation (no I/O)
+    pipelines/   one stage module per layer, composed by the CLI
+    backends/    SQL mechanics shared by every layer
+    core/        config and logging

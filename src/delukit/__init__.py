@@ -1,6 +1,12 @@
 """delukit: German energy data pipeline.
 
-Usage: delukit [raw|sync|data] [config_path]   (default: configs/data.json)
+Usage: delukit [bronze|silver|sync|all] [config_path]
+       (default: all — every stage in medallion order, configs/pipeline.json)
+
+`all` runs every implemented stage in order and stops at the first one
+that raises, so a fixed stage resumes where it broke; stores are
+idempotent, so reruns catch up. `sync` replays local bronze into remotes
+without fetching. gold joins the chain when pipelines/gold.py exists.
 
 Library:
     import delukit
@@ -16,6 +22,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 __all__ = ["fetch", "main"]
+
+_DEFAULT_CONFIG = "configs/pipeline.json"
 
 
 def _coerce_day(value: date | datetime | str, tz: str = "Europe/Berlin") -> date:
@@ -79,19 +87,32 @@ def fetch(
 
 def main() -> None:
     from delukit.core.log import setup_logging
-    from delukit.pipelines.raw import run, sync
 
     setup_logging()
-    args = sys.argv[1:]
-    if args and args[0] in ("raw", "sync", "data"):
-        command, args = args[0], args[1:]
-    else:
-        command = "raw"
-    if command == "data":
-        from delukit.pipelines.data import run as run_data
+    command, path = _parse_args(sys.argv[1:])
+    if command == "bronze":
+        from delukit.pipelines.bronze import run
 
-        path = args[0] if args else "configs/data.json"
-        run_data(path)
-    else:
-        path = args[0] if args else "configs/data.json"
-        (sync if command == "sync" else run)(path)
+        run(path)
+    elif command == "silver":
+        from delukit.pipelines.silver import run
+
+        run(path)
+    elif command == "sync":
+        from delukit.pipelines.bronze import sync
+
+        sync(path)
+    else:  # all: every implemented stage, in medallion order
+        from delukit.pipelines.bronze import run as run_bronze
+        from delukit.pipelines.silver import run as run_silver
+
+        for stage in (run_bronze, run_silver):  # gold joins here when it exists
+            stage(path)
+
+
+def _parse_args(args: list[str]) -> tuple[str, str]:
+    """Split argv into (command, config path); defaults: all, repo config."""
+    commands = ("bronze", "silver", "sync", "all")
+    if args and args[0] in commands:
+        return args[0], args[1] if len(args) > 1 else _DEFAULT_CONFIG
+    return "all", args[0] if args else _DEFAULT_CONFIG

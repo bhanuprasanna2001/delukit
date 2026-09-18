@@ -7,8 +7,8 @@ import pytest
 from delukit.layers.bronze.records import make_records
 from delukit.layers.bronze.store import LocalBronzeStore
 from delukit.layers.silver.store import LocalSilverStore
-from delukit.pipelines.data import run
-from delukit.pipelines.raw import PipelineError
+from delukit.pipelines import PipelineError
+from delukit.pipelines.silver import run
 
 TODAY = date(2026, 9, 16)
 DAY = date(2026, 9, 15)
@@ -79,19 +79,19 @@ def write_config(tmp_path, sources, **overrides):
         "sources": sources,
     }
     data.update(overrides)
-    path = tmp_path / "data.json"
+    path = tmp_path / "silver.json"
     path.write_text(json.dumps(data))
     return str(path)
 
 
 def patch(monkeypatch, bronze, silvers):
     monkeypatch.setattr(
-        "delukit.pipelines.data.build_bronze_store", lambda name: bronze
+        "delukit.pipelines.silver.build_bronze_store", lambda name: bronze
     )
     monkeypatch.setattr(
-        "delukit.pipelines.data.build_silver_store", lambda name: silvers[name]
+        "delukit.pipelines.silver.build_silver_store", lambda name: silvers[name]
     )
-    monkeypatch.setattr("delukit.pipelines.raw._today", lambda tz: TODAY)
+    monkeypatch.setattr("delukit.pipelines._today", lambda tz: TODAY)
 
 
 def seed(bronze, source, raws, fetched_at=T0):
@@ -208,8 +208,8 @@ def test_empty_bronze_warns_instead_of_silent_noop(monkeypatch, tmp_path, caplog
     silver = FakeSilverStore()
     patch(monkeypatch, bronze, {"local": silver})
 
-    with caplog.at_level(logging.WARNING, logger="delukit.data"):
+    with caplog.at_level(logging.WARNING, logger="delukit.silver"):
         run(path)
 
     assert silver.upserts == []
-    assert "run `delukit raw` before `delukit data`" in caplog.text
+    assert "run `delukit bronze` before `delukit silver`" in caplog.text

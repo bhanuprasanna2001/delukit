@@ -1,4 +1,4 @@
-"""Build source instances from raw config entries."""
+"""Build source instances from pipeline config entries."""
 
 from __future__ import annotations
 

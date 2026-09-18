@@ -25,7 +25,7 @@ from typing import Any
 
 import pandas as pd
 
-from delukit.core.config import DataConfig, load_data_config
+from delukit.core.config import PipelineConfig, load_pipeline_config
 from delukit.layers.bronze.store import build_bronze_store
 from delukit.layers.silver.loader import load_latest
 from delukit.layers.silver.parsers import energy_charts as ec_parser
@@ -34,24 +34,24 @@ from delukit.layers.silver.parsers import smard as smard_parser
 from delukit.layers.silver.parsers import weather as weather_parser
 from delukit.layers.silver.store import SilverStore, build_silver_store
 from delukit.layers.silver.tables import table_for
-from delukit.pipelines.raw import (
+from delukit.pipelines import (
     PipelineError,
-    _fmt_elapsed,
-    _resolve,
-    _window_start,
+    fmt_elapsed,
+    resolve_day,
+    window_start,
 )
 
-log = logging.getLogger("delukit.data")
+log = logging.getLogger("delukit.silver")
 
 
-def run(data_config_path: str) -> DataConfig:
+def run(config_path: str) -> PipelineConfig:
     """Parse bronze into every configured silver table and store."""
-    config = load_data_config(data_config_path)
-    end = _resolve(config.end, config.timezone)
-    begin = _resolve(config.start, config.timezone)
+    config = load_pipeline_config(config_path)
+    end = resolve_day(config.end, config.timezone)
+    begin = resolve_day(config.start, config.timezone)
     t0 = time.perf_counter()
     log.info(
-        "┌ data start · window=%s..%s · sources=%s · storages=%s",
+        "┌ silver start · window=%s..%s · sources=%s · storages=%s",
         begin,
         end,
         ", ".join(sorted(config.sources)),
@@ -61,7 +61,9 @@ def run(data_config_path: str) -> DataConfig:
     bronze = build_bronze_store("local")
     coverage = bronze.coverage()
     if not coverage:
-        log.warning("├─ no local bronze rows — run `delukit raw` before `delukit data`")
+        log.warning(
+            "├─ no local bronze rows — run `delukit bronze` before `delukit silver`"
+        )
     log.debug("bronze anchor (local): %d (source, day) pairs", len(coverage))
     stores: dict[str, SilverStore] = {
         name: build_silver_store(name) for name in config.storages
@@ -70,13 +72,13 @@ def run(data_config_path: str) -> DataConfig:
     failures: list[str] = []
     total_rows = 0
     for name, source_config in config.sources.items():
-        window_start = _window_start(name, source_config, begin, coverage)
-        if window_start > end:
+        first_day = window_start(name, source_config, begin, coverage)
+        if first_day > end:
             log.info("├─ %s: nothing new", name)
             continue
         t1 = time.perf_counter()
         try:
-            raws = load_latest(bronze.root, name, window_start, end)
+            raws = load_latest(bronze.root, name, first_day, end)
         except Exception as error:  # noqa: BLE001 — unreadable bronze isolates here
             log.error("├─ %s load failed: %s", name, error)
             failures.append(f"{name}: {error}")
@@ -87,7 +89,7 @@ def run(data_config_path: str) -> DataConfig:
         for entry in entries:
             table = table_for(name, entry["method"])
             frame, parse_failures = _parse_table(
-                name, entry, raws, window_start, end, config.timezone
+                name, entry, raws, first_day, end, config.timezone
             )
             failures.extend(parse_failures)
             if frame.empty:
@@ -106,20 +108,20 @@ def run(data_config_path: str) -> DataConfig:
                     "├─ %s: %d rows · %s · %s",
                     table,
                     len(frame),
-                    _fmt_elapsed(time.perf_counter() - t1),
+                    fmt_elapsed(time.perf_counter() - t1),
                     " · ".join(parts),
                 )
-    elapsed = _fmt_elapsed(time.perf_counter() - t0)
+    elapsed = fmt_elapsed(time.perf_counter() - t0)
     if failures:
         log.error(
-            "└ data failed · %d rows · %s · %d failed: %s",
+            "└ silver failed · %d rows · %s · %d failed: %s",
             total_rows,
             elapsed,
             len(failures),
             "; ".join(failures),
         )
         raise PipelineError("; ".join(failures))
-    log.info("└ data complete · %d rows · %s", total_rows, elapsed)
+    log.info("└ silver complete · %d rows · %s", total_rows, elapsed)
     return config
 
 

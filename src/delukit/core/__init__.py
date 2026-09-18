@@ -1,15 +1,13 @@
+"""Core: config loading and validation, shared logging setup."""
+
 from delukit.core.config import (
     ConfigError,
-    DataConfig,
-    RawConfig,
-    load_data_config,
-    load_raw_config,
+    PipelineConfig,
+    load_pipeline_config,
 )
 
 __all__ = [
     "ConfigError",
-    "DataConfig",
-    "RawConfig",
-    "load_data_config",
-    "load_raw_config",
+    "PipelineConfig",
+    "load_pipeline_config",
 ]

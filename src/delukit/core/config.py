@@ -13,31 +13,10 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
-class RawConfig:
-    start: date | str
-    end: date | str
-    timezone: str
-    storages: list[str]
-    sources: dict[str, dict]
-
-    @classmethod
-    def from_file(cls, path: str | Path) -> RawConfig:
-        raw = _read(path)
-        data = _parse(raw, path)
-        _validate(data)
-        return cls(
-            start=data["start"],
-            end=data["end"],
-            timezone=data["timezone"],
-            storages=data["storages"],
-            sources=data["sources"],
-        )
-
-
-@dataclass(frozen=True)
-class DataConfig:
-    """Silver config: same sources shape as raw; fetch_policy (if present)
-    is ignored — source fallback is gold's job, silver keeps every source."""
+class PipelineConfig:
+    """One config drives every stage: bronze fetches it, silver parses it,
+    gold will transform it. fetch_policy (if present) is ignored by bronze
+    and silver — source fallback is gold's job, silver keeps every source."""
 
     start: date | str
     end: date | str
@@ -46,7 +25,7 @@ class DataConfig:
     sources: dict[str, dict]
 
     @classmethod
-    def from_file(cls, path: str | Path) -> DataConfig:
+    def from_file(cls, path: str | Path) -> PipelineConfig:
         raw = _read(path)
         data = _parse(raw, path)
         _validate(data)
@@ -341,9 +320,5 @@ def _validate_weather(source: object) -> None:
             )
 
 
-def load_raw_config(path: str | Path) -> RawConfig:
-    return RawConfig.from_file(path)
-
-
-def load_data_config(path: str | Path) -> DataConfig:
-    return DataConfig.from_file(path)
+def load_pipeline_config(path: str | Path) -> PipelineConfig:
+    return PipelineConfig.from_file(path)

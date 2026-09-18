@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from delukit.core.config import ConfigError, RawConfig, load_raw_config
+from delukit.core.config import ConfigError, PipelineConfig, load_pipeline_config
 
 VALID = {
     "start": "2025-10-01",
@@ -37,120 +37,143 @@ VALID = {
 }
 
 
-def test_load_valid_raw_config(tmp_path):
-    file = tmp_path / "raw.json"
+def test_load_valid_config(tmp_path):
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
-    assert isinstance(config, RawConfig)
+    assert isinstance(config, PipelineConfig)
     assert config.storages == ["local"]
     assert config.sources["smard"]["area"] == "DE_LU"
 
 
 def test_malformed_json(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text("{not json")
 
     with pytest.raises(ConfigError, match="not valid json"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_missing_file():
     with pytest.raises(ConfigError, match="not found"):
-        load_raw_config("nope.json")
+        load_pipeline_config("nope.json")
 
 
 def test_missing_field(tmp_path):
     data = {key: value for key, value in VALID.items() if key != "timezone"}
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="timezone"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_bad_date(tmp_path):
     data = {**VALID, "start": "2025/10/01"}
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="iso date"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_unknown_source(tmp_path):
     data = {**VALID, "sources": {**VALID["sources"], "nope": {}}}
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="unknown source"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
-def test_repo_raw_config_loads():
-    path = Path(__file__).parents[1] / "configs" / "data.json"
-    config = load_raw_config(path)
+def test_repo_pipeline_config_loads():
+    path = Path(__file__).parents[1] / "configs" / "pipeline.json"
+    config = load_pipeline_config(path)
 
     assert str(config.start) == "2025-10-01"
     assert set(config.sources) == {"smard", "entsoe", "energy_charts", "weather"}
+    # fetch_policy rides along in the config; bronze and silver ignore it,
+    # gold decides (see test_config_keeps_fetch_policy below)
+    assert (
+        config.sources["energy_charts"]["methods"][0]["fetch_policy"]["mode"]
+        == "fallback"
+    )
 
 
-def test_raw_run_uses_raw_config(tmp_path):
-    file = tmp_path / "raw.json"
+def test_pipeline_config_exposes_source_fields(tmp_path):
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
-    assert isinstance(config, RawConfig)
+    assert isinstance(config, PipelineConfig)
     assert config.sources["smard"]["resolution"] == "15min"
+
+
+def test_config_keeps_fetch_policy(tmp_path):
+    methods = [
+        {
+            "bidding_zone": "DE-LU",
+            "method": "day_ahead_price",
+            "fetch_policy": {"mode": "fallback"},
+        }
+    ]
+    data = {**VALID, "sources": {"energy_charts": {"methods": methods}}}
+    file = tmp_path / "config.json"
+    file.write_text(json.dumps(data))
+
+    config = load_pipeline_config(file)
+
+    assert config.sources["energy_charts"]["methods"][0]["method"] == "day_ahead_price"
 
 
 def test_unknown_storage(tmp_path):
     data = {**VALID, "storages": ["local", "bogus"]}
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="unknown storage"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_storages_may_omit_local(tmp_path):
     for storages in (["databricks"], ["snowflake"], ["databricks", "snowflake"]):
         data = {**VALID, "storages": storages}
-        file = tmp_path / "raw.json"
+        file = tmp_path / "config.json"
         file.write_text(json.dumps(data))
 
-        assert load_raw_config(file).storages == storages
+        assert load_pipeline_config(file).storages == storages
 
 
 def test_storages_must_be_non_empty(tmp_path):
     data = {**VALID, "storages": []}
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="non-empty"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 @pytest.mark.parametrize("value", [0, -3, 2.5, "7", True])
 def test_invalid_refresh_days(tmp_path, value):
     data = json.loads(json.dumps(VALID))
     data["sources"]["smard"]["refresh_days"] = value
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="refresh_days"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_valid_refresh_days(tmp_path):
     data = json.loads(json.dumps(VALID))
     data["sources"]["smard"]["refresh_days"] = 2
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
     assert config.sources["smard"]["refresh_days"] == 2
 
@@ -169,10 +192,10 @@ ENERGY_CHARTS_VALID = {
 
 
 def test_valid_energy_charts_methods(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(ENERGY_CHARTS_VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
     assert config.sources["energy_charts"]["methods"][0]["bidding_zone"] == "DE-LU"
 
@@ -196,11 +219,11 @@ def energy_charts_config(methods):
     ],
 )
 def test_invalid_energy_charts_methods(tmp_path, methods, message):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(energy_charts_config(methods)))
 
     with pytest.raises(ConfigError, match=message):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 ENTSOE_VALID = {
@@ -231,10 +254,10 @@ def entsoe_config(methods):
 
 
 def test_valid_entsoe_methods(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(ENTSOE_VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
     assert config.sources["entsoe"]["methods"][0]["sequences"] == [1, 2]
 
@@ -269,11 +292,11 @@ def test_valid_entsoe_methods(tmp_path):
     ],
 )
 def test_invalid_entsoe_methods(tmp_path, methods, message):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(entsoe_config(methods)))
 
     with pytest.raises(ConfigError, match=message):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 SMARD_VALID = {
@@ -314,10 +337,10 @@ def smard_config(methods=None, resolution="15min", area="DE_LU"):
 
 
 def test_valid_smard_methods(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(SMARD_VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
     methods = config.sources["smard"]["methods"]
     assert methods[3]["generation_types"] == ["solar", "wind_offshore", "wind_onshore"]
@@ -346,38 +369,38 @@ def test_valid_smard_methods(tmp_path):
     ],
 )
 def test_invalid_smard_methods(tmp_path, methods, message):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(smard_config(methods=methods)))
 
     with pytest.raises(ConfigError, match=message):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 @pytest.mark.parametrize("resolution", ["5min", [], {"value": "15min"}, 15])
 def test_invalid_smard_resolution(tmp_path, resolution):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(smard_config(resolution=resolution)))
 
     with pytest.raises(ConfigError, match="resolution must be 15min or hour"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_smard_missing_methods_field(tmp_path):
     data = json.loads(json.dumps(SMARD_VALID))
     del data["sources"]["smard"]["methods"]
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="smard is missing field: methods"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_invalid_smard_area(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(smard_config(area=5)))
 
     with pytest.raises(ConfigError, match="smard area must be a string"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 WEATHER_VALID = {
@@ -416,10 +439,10 @@ def weather_config(**overrides):
 
 
 def test_valid_weather(tmp_path):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(WEATHER_VALID))
 
-    config = load_raw_config(file)
+    config = load_pipeline_config(file)
 
     weather = config.sources["weather"]
     assert weather["model"] == "ecmwf_ifs"
@@ -443,21 +466,21 @@ def test_valid_weather(tmp_path):
     ],
 )
 def test_invalid_weather_source(tmp_path, overrides, message):
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(weather_config(**overrides)))
 
     with pytest.raises(ConfigError, match=message):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 def test_weather_location_missing_field(tmp_path):
     data = weather_config()
     del data["sources"]["weather"]["locations"][0]["latitude"]
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match="missing field: latitude"):
-        load_raw_config(file)
+        load_pipeline_config(file)
 
 
 @pytest.mark.parametrize(
@@ -516,8 +539,8 @@ def test_invalid_weather_location(tmp_path, location, message):
         locations.append(dict(location, name=locations[0]["name"]))
     else:
         locations.append(location)
-    file = tmp_path / "raw.json"
+    file = tmp_path / "config.json"
     file.write_text(json.dumps(data))
 
     with pytest.raises(ConfigError, match=message):
-        load_raw_config(file)
+        load_pipeline_config(file)
