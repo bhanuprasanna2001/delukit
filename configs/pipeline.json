@@ -53,16 +53,7 @@
             "methods": [
                 {
                     "bidding_zone": "DE-LU",
-                    "method": "day_ahead_price",
-                    "fetch_policy": {
-                        "mode": "fallback",
-                        "fallback_for": {
-                            "source": "entsoe",
-                            "area": "DE_LU",
-                            "method": "day_ahead_price"
-                        },
-                        "when": "missing_intervals"
-                    }
+                    "method": "day_ahead_price"
                 }
             ]
         },
@@ -269,5 +260,239 @@
                 }
             ]
         }
+    },
+    "gold": {
+        "calendar": {
+            "country": "DE",
+            "holiday_source": "open_holidays",
+            "holiday_scope": "nationwide",
+            "features": [
+                "hour",
+                "day_of_week",
+                "month",
+                "is_weekend",
+                "is_working_day",
+                "is_holiday",
+                "is_bridge_day",
+                "days_to_holiday",
+                "days_since_holiday",
+                "hour_sin",
+                "hour_cos",
+                "day_of_week_sin",
+                "day_of_week_cos"
+            ]
+        },
+        "datasets": [
+            {
+                "name": "epf_features",
+                "grain": "15min",
+                "target": "day_ahead_price",
+                "columns": [
+                    "day_ahead_price",
+                    "day_ahead_price_lag_24h",
+                    "day_ahead_price_lag_168h",
+                    "day_ahead_price_roll_mean_24h",
+                    "day_ahead_price_diff_24h",
+                    "load_forecast",
+                    "wind_onshore_forecast",
+                    "hour",
+                    "day_of_week",
+                    "is_weekend",
+                    "is_working_day",
+                    "is_holiday",
+                    "is_bridge_day",
+                    "hour_sin",
+                    "hour_cos",
+                    "temperature_2m__national",
+                    "wind_speed_100m__national",
+                    "shortwave_radiation__national",
+                    "hdd__temperature_2m__national",
+                    "wind_power_proxy__wind_speed_100m__national",
+                    "temperature_2m__national_lag_24h",
+                    "temperature_2m__offshore",
+                    "wind_speed_100m__offshore"
+                ],
+                "series": [
+                    {
+                        "name": "day_ahead_price",
+                        "from": [
+                            {
+                                "source": "entsoe",
+                                "method": "day_ahead_price",
+                                "sequence": 1
+                            },
+                            {
+                                "source": "smard",
+                                "method": "day_ahead_price"
+                            },
+                            {
+                                "source": "energy_charts",
+                                "method": "day_ahead_price"
+                            }
+                        ],
+                        "upsample": "ffill",
+                        "transforms": [
+                            {
+                                "type": "lag",
+                                "offsets_h": [
+                                    24,
+                                    48,
+                                    72,
+                                    168
+                                ]
+                            },
+                            {
+                                "type": "rolling",
+                                "agg": [
+                                    "mean",
+                                    "std"
+                                ],
+                                "windows_h": [
+                                    24,
+                                    168
+                                ]
+                            },
+                            {
+                                "type": "diff",
+                                "offsets_h": [
+                                    1,
+                                    24
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "name": "load_forecast",
+                        "from": [
+                            {
+                                "source": "entsoe",
+                                "method": "load_forecast"
+                            },
+                            {
+                                "source": "smard",
+                                "method": "load_forecast"
+                            }
+                        ],
+                        "upsample": "interpolate"
+                    },
+                    {
+                        "name": "wind_onshore_forecast",
+                        "from": [
+                            {
+                                "source": "entsoe",
+                                "method": "generation_forecast",
+                                "psr_type": "B18"
+                            },
+                            {
+                                "source": "smard",
+                                "method": "generation_forecast_day_ahead",
+                                "generation_type": "wind_onshore"
+                            }
+                        ]
+                    }
+                ],
+                "weather": {
+                    "run_policy": "day_ahead_gate",
+                    "levels": [
+                        "region",
+                        "national"
+                    ],
+                    "fields": [
+                        "temperature_2m",
+                        "wind_speed_100m",
+                        "wind_direction_100m",
+                        "shortwave_radiation",
+                        "cloud_cover"
+                    ],
+                    "regions": {
+                        "north": {
+                            "locations": [
+                                "emden",
+                                "bremen",
+                                "hamburg",
+                                "kiel",
+                                "rostock"
+                            ],
+                            "method": "mean"
+                        },
+                        "west": {
+                            "locations": [
+                                "muenster",
+                                "cologne",
+                                "frankfurt",
+                                "hanover",
+                                "luxembourg"
+                            ],
+                            "method": "mean"
+                        },
+                        "east": {
+                            "locations": [
+                                "berlin",
+                                "leipzig",
+                                "dresden",
+                                "erfurt"
+                            ],
+                            "method": "mean"
+                        },
+                        "south": {
+                            "locations": [
+                                "stuttgart",
+                                "freiburg",
+                                "munich",
+                                "passau",
+                                "nuremberg",
+                                "kassel"
+                            ],
+                            "method": "mean"
+                        },
+                        "offshore": {
+                            "locations": [
+                                "north_sea_west",
+                                "north_sea_centre",
+                                "north_sea_east",
+                                "baltic_west",
+                                "baltic_east"
+                            ],
+                            "method": "mean"
+                        }
+                    },
+                    "national": {
+                        "method": "region_mean"
+                    },
+                    "derived": [
+                        {
+                            "type": "hdd",
+                            "from": "temperature_2m",
+                            "base_c": 15.5
+                        },
+                        {
+                            "type": "cdd",
+                            "from": "temperature_2m",
+                            "base_c": 22.0
+                        },
+                        {
+                            "type": "wind_power_proxy",
+                            "from": "wind_speed_100m"
+                        }
+                    ],
+                    "transforms": [
+                        {
+                            "type": "lag",
+                            "offsets_h": [
+                                24,
+                                168
+                            ],
+                            "applies_to": [
+                                "temperature_2m",
+                                "wind_speed_100m",
+                                "hdd",
+                                "cdd",
+                                "wind_power_proxy"
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
     }
 }

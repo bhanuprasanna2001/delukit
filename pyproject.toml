@@ -12,6 +12,7 @@ dependencies = [
     "entsoe-py>=0.8.1",
     "pandas>=3.0.5",
     "pyarrow>=25.0.1",
+    "pydantic>=2.13.5",
     "pyrate-limiter>=4.5.0",
     "requests>=2.34.2",
     "snowflake-connector-python>=4.7.4",
