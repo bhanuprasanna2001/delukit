@@ -1,6 +1,6 @@
 """DE-LU calendar, one file per day and country.
 
-Layout: data/bronze/<day>/calendar/<de|lu>/data.json
+Layout: data/raw/<day>/calendar/<de|lu>/data.json
 
 Each file holds that day's deterministic date parts (Monday=0 day_of_week,
 weekend), nationwide public-holiday flags, plus the regional detail shaping
@@ -307,6 +307,76 @@ def sync(start, end, on_each=None):
             WORKERS,
             on_each,
         )
+
+
+def _flags(doc):
+    school = doc["school_subdivisions"]
+    regional = doc["regional_public_subdivisions"]
+    return {
+        "is_holiday": doc["is_holiday"],
+        "is_working_day": doc["is_working_day"],
+        "is_bridge_day": doc["is_bridge_day"],
+        "school_holiday": bool(school),
+        "school_subdivisions": "|".join(school),
+        "regional_public_subdivisions": "|".join(regional),
+    }
+
+
+def to_clean(days=None):
+    """Expand daily raw files to quarter-hours: data/clean/calendar.parquet.
+
+    Per-country flags keep their ``de_``/``lu_`` prefix; combined columns OR
+    both countries, matching how zone load sees holidays.
+    """
+    import json
+
+    import pandas as pd
+
+    from delukit.core.clean import (
+        frame,
+        quarter_grid,
+        raw_days,
+        write_clean,
+    )
+
+    days = days or raw_days()
+    rows = []
+    for day in days:
+        docs = {}
+        for category in calendar_countries:
+            path = BASE_DIR / day.isoformat() / "calendar" / category / "data.json"
+            if path.exists():
+                docs[category] = json.loads(path.read_bytes())
+        if not docs:
+            continue
+        grid = quarter_grid(day)
+        base = frame(grid).reset_index()
+        de = _flags(docs["de"]) if "de" in docs else None
+        lu = _flags(docs["lu"]) if "lu" in docs else None
+        for _, row in base.iterrows():
+            record = dict(row)
+            for prefix, flags in (("de", de), ("lu", lu)):
+                if flags is None:
+                    continue
+                for key, value in flags.items():
+                    record[f"{prefix}_{key}"] = value
+            weekend = docs.get("de", docs.get("lu"))["day_of_week"] >= 5
+            de_hol = de["is_holiday"] if de else False
+            lu_hol = lu["is_holiday"] if lu else False
+            record["is_weekend"] = weekend
+            record["is_holiday"] = de_hol or lu_hol
+            record["is_working_day"] = not weekend and not record["is_holiday"]
+            record["is_bridge_day"] = (de["is_bridge_day"] if de else False) or (
+                lu["is_bridge_day"] if lu else False
+            )
+            record["school_holiday"] = (de["school_holiday"] if de else False) or (
+                lu["school_holiday"] if lu else False
+            )
+            rows.append(record)
+    df = pd.DataFrame(rows).set_index("timestamp_utc").sort_index()
+    path = write_clean(df, "calendar")
+    log.info("clean calendar: %d rows x %d cols -> %s", len(df), len(df.columns), path)
+    return path
 
 
 if __name__ == "__main__":

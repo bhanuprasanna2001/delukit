@@ -52,7 +52,7 @@ def show_header(end):
     width = max(len(line) for line in body)
     bar = "=" * width
     print(bar)
-    print("  // DELUKIT :: bronze sync //")
+    print("  // DELUKIT :: raw sync //")
     print("-" * width)
     print("\n".join(body))
     print(bar)

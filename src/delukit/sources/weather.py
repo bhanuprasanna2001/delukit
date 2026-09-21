@@ -1,6 +1,6 @@
 """Raw Open-Meteo single-run forecasts, one file per day and cell group.
 
-Layout: data/bronze/<day>/weather/<land|sea>/data.json
+Layout: data/raw/<day>/weather/<land|sea>/data.json
 
 Each file holds one model's 00z run for every location in the group.
 Runs are immutable: a file, once written, is never re-fetched.
@@ -11,7 +11,7 @@ import logging
 import re
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -176,6 +176,55 @@ def sync(start, end, on_each=None):
         )
     counts["unchanged"] += skipped
     return counts
+
+
+def to_clean(days=None):
+    """Parse every raw run-file into versioned data/clean/weather.parquet.
+
+    One row per run x location x valid hour. ``available_at`` is the run's
+    00z issue time, so downstream can replay what was known when.
+    """
+    import json
+
+    import pandas as pd
+
+    from delukit.core.clean import BERLIN, UTC, raw_days, write_clean
+
+    days = days or raw_days()
+    rows = []
+    for day in days:
+        available_at = pd.Timestamp(
+            datetime(day.year, day.month, day.day, tzinfo=UTC)
+        )
+        for group, locations in WEATHER_LOCATIONS.items():
+            path = BASE_DIR / day.isoformat() / "weather" / group / "data.json"
+            if not path.exists():
+                continue
+            for (name, _, _), record in zip(locations, json.loads(path.read_bytes())):
+                hourly = record["hourly"]
+                for i, stamp in enumerate(hourly["time"]):
+                    valid_berlin = datetime.fromisoformat(stamp).replace(tzinfo=BERLIN)
+                    rows.append(
+                        {
+                            "timestamp_utc": valid_berlin.astimezone(UTC),
+                            "run_day": day.isoformat(),
+                            "available_at": available_at,
+                            "location": name,
+                            "group": group,
+                            "latitude": record["latitude"],
+                            "longitude": record["longitude"],
+                            **{
+                                field: hourly[field][i]
+                                for field in WEATHER_FIELDS
+                            },
+                        }
+                    )
+    df = pd.DataFrame(rows)
+    df["timestamp_berlin"] = pd.to_datetime(df["timestamp_utc"]).dt.tz_convert(BERLIN)
+    df = df.set_index("timestamp_utc").sort_index()
+    path = write_clean(df, "weather")
+    log.info("clean weather: %d rows x %d cols -> %s", len(df), len(df.columns), path)
+    return path
 
 
 if __name__ == "__main__":

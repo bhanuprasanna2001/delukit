@@ -1,6 +1,6 @@
 """Raw ENTSO-E Transparency XML, one file per day.
 
-Layout: data/bronze/<day>/entsoe/<category>/data.xml
+Layout: data/raw/<day>/entsoe/<category>/data.xml
 """
 
 import logging
@@ -150,6 +150,119 @@ def sync(start, end, on_each=None):
         )
     counts["unchanged"] += skipped
     return counts
+
+
+def _local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _series_key(category, header):
+    if category == "SDAC":
+        return f"price_sdac_seq{header['seq']}_eur_mwh"
+    if category == "EXAA":
+        return "price_exaa_eur_mwh"
+    if category == "load_actual":
+        return "load_actual_mw"
+    if category == "load_forecast":
+        return "load_forecast_mw"
+    if category == "generation_forecast":
+        return "gen_forecast_total_mw"
+    if category == "generation_wind_solar_forecast":
+        return {
+            "B16": "solar_forecast_mw",
+            "B18": "wind_offshore_forecast_mw",
+            "B19": "wind_onshore_forecast_mw",
+        }[header["psr"]]
+    if category == "generation_actual":
+        # B10 metered twice: pumping (outBiddingZone) vs turbine (inBiddingZone).
+        suffix = ""
+        if header["psr"] == "B10":
+            suffix = "_inBZ" if header["in_bz"] else "_outBZ"
+        return f"gen_actual_{header['psr']}{suffix}_mw"
+    raise ValueError(f"unknown ENTSO-E category: {category}")
+
+
+def _read_file(path):
+    """{series_key: {timestamp_utc: value}} for one raw day-file."""
+    import pandas as pd
+
+    root = ET.parse(path).getroot()
+    out = {}
+    for ts in root.iter():
+        if _local(ts.tag) != "TimeSeries":
+            continue
+        header = {"seq": None, "psr": None, "in_bz": False}
+        period = None
+        for child in ts:
+            name = _local(child.tag)
+            if name == "Period":
+                period = child
+            elif name == "classificationSequence_AttributeInstanceComponent.position":
+                header["seq"] = child.text
+            elif name == "MktPSRType":
+                header["psr"] = next(
+                    c.text for c in child if _local(c.tag) == "psrType"
+                )
+            elif name == "inBiddingZone_Domain.mRID":
+                header["in_bz"] = True
+        match = re.fullmatch(r"PT(\d+)([MH])", _text(period, "resolution"))
+        step = int(match.group(1)) * (60 if match.group(2) == "H" else 1)
+        start = _period_start(period)
+        key = _series_key(path.parent.name, header)
+        series = out.setdefault(key, {})
+        for point in period:
+            if _local(point.tag) != "Point":
+                continue
+            pos, value = None, None
+            for field in point:
+                fname = _local(field.tag)
+                if fname == "position":
+                    pos = int(field.text)
+                elif fname in ("quantity", "price.amount"):
+                    value = float(field.text)
+            stamp = start + timedelta(minutes=step * (pos - 1))
+            series[pd.Timestamp(stamp)] = value
+    return out
+
+
+def _text(period, name):
+    for child in period:
+        if _local(child.tag) == name:
+            return child.text
+    raise ValueError(f"missing <{name}> in ENTSO-E Period")
+
+
+def _period_start(period):
+    for child in period:
+        if _local(child.tag) == "timeInterval":
+            for field in child:
+                if _local(field.tag) == "start":
+                    return datetime.fromisoformat(field.text)
+    raise ValueError("missing Period timeInterval start")
+
+
+def to_clean(days=None):
+    """Parse every raw day-file into data/clean/entsoe.parquet (NaN on gaps)."""
+    import pandas as pd
+
+    from delukit.core.clean import frame, master_index, raw_days, write_clean
+
+    days = days or raw_days()
+    columns = {}
+    for day in days:
+        for category in entsoe_params:
+            path = BASE_DIR / day.isoformat() / "entsoe" / category / "data.xml"
+            if not path.exists():
+                continue
+            for key, series in _read_file(path).items():
+                columns.setdefault(key, {}).update(series)
+    idx = master_index(days)
+    df = frame(idx)
+    for key, series in columns.items():
+        df[key] = pd.Series(series).groupby(level=0).last().reindex(idx)
+    path = write_clean(df, "entsoe")
+    log.info("clean entsoe: %d rows x %d cols -> %s", len(df), len(df.columns), path)
+    return path
 
 
 if __name__ == "__main__":

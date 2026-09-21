@@ -1,6 +1,6 @@
 """Raw SMARD XML exports, one file per day.
 
-Layout: data/bronze/<day>/smard/<category>/data.xml
+Layout: data/raw/<day>/smard/<category>/data.xml
 """
 
 import logging
@@ -149,6 +149,74 @@ def sync(start, end, on_each=None):
         )
     counts["unchanged"] += skipped
     return counts
+
+
+def _number(text):
+    text = text.strip().replace(",", "")
+    return float("nan") if text in ("", "-") else float(text)
+
+
+def _slug(name):
+    return name.lower().replace("/", "_").replace(" ", "_").replace("-", "_")
+
+
+def _columns(category, components):
+    """Canonical clean names for a category's components, in file order."""
+    if category in ("day_ahead_prices", "load_actual", "load_forecast"):
+        return {
+            "day_ahead_prices": "price_day_ahead_eur_mwh",
+            "load_actual": "load_actual_mwh",
+            "load_forecast": "load_forecast_mwh",
+        }[category]
+    prefix = "gen_actual" if category == "generation_actual" else "gen_forecast"
+    return [f"{prefix}_{_slug(c.findtext('Component_name'))}_mwh" for c in components]
+
+
+def to_clean(days=None):
+    """Parse every raw day-file into data/clean/smard.parquet (NaN on gaps)."""
+    import pandas as pd
+
+    from delukit.core.clean import (
+        frame,
+        master_index,
+        quarter_grid,
+        raw_days,
+        write_clean,
+    )
+
+    days = days or raw_days()
+    columns = {}
+    for day in days:
+        grid = quarter_grid(day)
+        for category in smard_modules:
+            path = BASE_DIR / day.isoformat() / "smard" / category / "data.xml"
+            if not path.exists():
+                continue
+            root = ET.parse(path).getroot()
+            components = root.find("Category").find("Components").findall("Component")
+            names = _columns(category, components)
+            if isinstance(names, str):
+                names = [names]
+            for name, comp in zip(names, components):
+                # Positional mapping: i-th value is the i-th quarter of the
+                # Berlin day. This survives the duplicated 2am hour on
+                # fall-back days; values past midnight belong to next day.
+                values = comp.find("Values").findall("Value_detail")
+                if len(values) < len(grid):
+                    log.warning(
+                        "smard %s %s: only %d values for %d quarters",
+                        category, day, len(values), len(grid),
+                    )
+                series = columns.setdefault(name, {})
+                for stamp, detail in zip(grid, values):
+                    series[stamp] = _number(detail.findtext("Value"))
+    idx = master_index(days)
+    df = frame(idx)
+    for key, series in columns.items():
+        df[key] = pd.Series(series).groupby(level=0).last().reindex(idx)
+    path = write_clean(df, "smard")
+    log.info("clean smard: %d rows x %d cols -> %s", len(df), len(df.columns), path)
+    return path
 
 
 if __name__ == "__main__":

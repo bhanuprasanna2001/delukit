@@ -1,4 +1,4 @@
-"""Shared bronze-sync settings (used by every source)."""
+"""Shared raw-sync settings (used by every source)."""
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 TIMEZONE = "Europe/Berlin"
 
-BASE_DIR = Path("data/bronze")
+BASE_DIR = Path("data/raw")
+CLEAN_DIR = Path("data/clean")
 
 # Days with no local file yet are always fetched. Files younger than this are
 # re-fetched every run because providers revise recent data in place.
@@ -52,6 +53,7 @@ from delukit.core.config.weather import (
 
 __all__ = [
     "BASE_DIR",
+    "CLEAN_DIR",
     "ENERGY_CHARTS_BZN",
     "ENERGY_CHARTS_URL",
     "ENTSOE_AREA",

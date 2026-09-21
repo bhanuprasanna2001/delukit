@@ -1,6 +1,6 @@
 """Raw Energy-Charts day-ahead prices, one file per day.
 
-Layout: data/bronze/<day>/energy_charts/day_ahead_price/data.json
+Layout: data/raw/<day>/energy_charts/day_ahead_price/data.json
 
 DE-LU only. Prices are final once the day-ahead auction publishes, so a file
 once written is never re-fetched; days with no data yet (404) retry next run.

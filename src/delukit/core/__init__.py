@@ -1,5 +1,6 @@
 from delukit.core.config import (
     BASE_DIR,
+    CLEAN_DIR,
     ENERGY_CHARTS_BZN,
     ENERGY_CHARTS_URL,
     ENTSOE_URL,
@@ -26,6 +27,7 @@ from delukit.core.progress import sync_progress
 
 __all__ = [
     "BASE_DIR",
+    "CLEAN_DIR",
     "ENERGY_CHARTS_BZN",
     "ENERGY_CHARTS_URL",
     "ENTSOE_URL",
