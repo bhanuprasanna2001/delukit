@@ -110,7 +110,10 @@ def create_workflow_from_config(
     config: ForecastingWorkflowConfig, *, calibrate: bool = True
 ) -> CustomForecastingWorkflow:
     """Preset assembly plus real thread count (used by the tuner per trial)."""
-    from openstef_models.transforms.postprocessing import IsotonicQuantileCalibrator
+    from openstef_models.transforms.postprocessing import (
+        IsotonicQuantileCalibrator,
+        QuantileSorter,
+    )
 
     workflow = create_forecasting_workflow(config)
     forecaster = workflow.model.forecaster
@@ -120,12 +123,15 @@ def create_workflow_from_config(
         forecaster.model_post_init(None)
     if calibrate and CALIBRATE_QUANTILES:
         # Per the probabilistic-forecasting guide: isotonic mapping fitted
-        # on train predictions during fit.
+        # on train predictions during fit. The per-quantile maps can cross
+        # where the raw model is flat (e.g. PV at night), so sort last to
+        # restore the P10 <= P50 <= P90 invariant.
         workflow.model.postprocessing.transforms.append(
             IsotonicQuantileCalibrator(
                 quantiles=list(config.quantiles), use_local_quantile_estimation=True
             )
         )
+        workflow.model.postprocessing.transforms.append(QuantileSorter())
     return workflow
 
 
