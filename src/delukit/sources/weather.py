@@ -220,6 +220,12 @@ def to_clean(days=None):
                         }
                     )
     df = pd.DataFrame(rows)
+    # Spring-forward days contain a nonexistent 02:00 wall time that maps onto
+    # the same UTC instant as 03:00; keep the real one. Fall-back's single 02:00
+    # maps fold=0, leaving a 1h gap downstream ffill covers (limit 96 quarters).
+    # ponytail: hourly wall-time API can't represent both folds; UTC-native
+    # hourly+minute API if this gap ever matters.
+    df = df.drop_duplicates(subset=["run_day", "location", "timestamp_utc"], keep="last")
     # Night radiation arrives as null in some runs, 0.0 in others; null
     # alongside a valid temperature is night (-> 0). Run-tail nulls
     # (all fields null) stay NaN.

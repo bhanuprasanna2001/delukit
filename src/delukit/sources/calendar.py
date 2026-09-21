@@ -31,6 +31,7 @@ import requests
 
 from delukit.core.config import BASE_DIR, REFRESH_DAYS, TIMEZONE
 from delukit.core.config.calendar import (
+    CALENDAR_AHEAD_DAYS,
     OPENHOLIDAYS_CACHE_DIR,
     OPENHOLIDAYS_PUBLIC_URL,
     OPENHOLIDAYS_SCHOOL_URL,
@@ -291,6 +292,7 @@ def fetch_day(category, day, today=None, session=None):
 
 def sync(start, end, on_each=None):
     today = end - timedelta(days=1)
+    end = max(end, today + timedelta(days=CALENDAR_AHEAD_DAYS))
 
     work = []
     day = start

@@ -14,3 +14,7 @@ calendar_countries = {
     "de": "DE",
     "lu": "LU",
 }
+
+# Feature snapshots need delivery days D+1..D+10, but the shared sync end is
+# only D+1; calendar extends its own window to cover the horizon.
+CALENDAR_AHEAD_DAYS = 10

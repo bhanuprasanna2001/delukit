@@ -1,4 +1,5 @@
 import threading
+from datetime import timedelta
 
 from dotenv import load_dotenv
 
@@ -10,7 +11,7 @@ from delukit.core import (
     setup_logging,
     sync_progress,
 )
-from delukit.core.config.calendar import calendar_countries
+from delukit.core.config.calendar import CALENDAR_AHEAD_DAYS, calendar_countries
 from delukit.core.config.entsoe import entsoe_params
 from delukit.core.config.smard import smard_modules
 from delukit.core.config.weather import (
@@ -82,8 +83,11 @@ def main():
     show_header(end)
 
     days = (end - START).days + 1
+    cal_end = max(end, end + timedelta(days=CALENDAR_AHEAD_DAYS - 1))
+    cal_days = (cal_end - START).days + 1
     totals = {
-        source: len(categories) * days for source, (_, categories) in SOURCES.items()
+        source: len(categories) * (cal_days if source == "calendar" else days)
+        for source, (_, categories) in SOURCES.items()
     }
     counts = {}
 
