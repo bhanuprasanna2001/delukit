@@ -230,6 +230,7 @@ MLFLOW_DIR = Path("data/mlflow")
 TUNING_DIR = Path("data/tuning")
 BACKTEST_DIR = Path("data/backtests")
 FORECAST_DIR = Path("data/forecasts")
+SCORES_DIR = Path("data/scores")
 
 
 def weather_ref(field: str) -> str:
@@ -251,9 +252,13 @@ def model_id(target: str, gate: str, span: str) -> str:
 
 
 def mlflow_storage() -> MLFlowStorage:
-    """Local registry: sqlite tracking (MLflow 3 deprecated the file store)."""
+    """Local registry: sqlite tracking (MLflow 3 deprecated the file store).
+
+    Staging also lives under data/mlflow so fits leave nothing in the repo root.
+    """
     MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
     return MLFlowStorage(
         tracking_uri=f"sqlite:///{(MLFLOW_DIR / 'mlflow.db').resolve()}",
+        local_artifacts_path=MLFLOW_DIR / "artifacts_local",
         artifact_location=f"file:{(MLFLOW_DIR / 'artifacts').resolve()}",
     )
