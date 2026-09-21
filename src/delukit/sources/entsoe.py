@@ -5,6 +5,7 @@ Layout: data/bronze/<day>/entsoe/<category>/data.xml
 
 import logging
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
@@ -23,6 +24,21 @@ REQUEST_GAP = 1.0  # per worker; 6 workers ≈ 360 req/min, under the 400 limit
 WORKERS = 6
 RETRY_GAP = 60  # token banned ~10 min on abuse; leftovers resume next run
 MAX_RETRIES = 3
+
+# Document <mRID> (random hex per response) and <createdDateTime> (fetch time)
+# are envelope metadata, not data; ignore them or every re-fetch looks
+# "updated". TimeSeries <mRID>1,2,..</TimeSeries> are stable indexes, kept.
+# Same idea as smard's <Header> strip.
+_VOLATILE = re.compile(
+    rb"<mRID>[0-9a-fA-F]{32}</mRID>"
+    rb"|<createdDateTime>.*?</createdDateTime>"
+    rb"|<revisionNumber>.*?</revisionNumber>",
+    re.DOTALL,
+)
+
+
+def _comparable(body):
+    return _VOLATILE.sub(b"", body)
 
 
 def _window(day):
@@ -97,7 +113,7 @@ def fetch_day(category, day, today=None, session=None):
     if body is False:
         raise ValueError(f"invalid XML: {category} {day}")
 
-    if path.exists() and path.read_bytes() == body:
+    if path.exists() and _comparable(path.read_bytes()) == _comparable(body):
         return "unchanged"
 
     state = "updated" if path.exists() else "fetched"
