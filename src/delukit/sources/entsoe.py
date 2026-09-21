@@ -242,10 +242,20 @@ def _period_start(period):
 
 
 def to_clean(days=None):
-    """Parse every raw day-file into data/clean/entsoe.parquet (NaN on gaps)."""
+    """Parse every raw day-file into data/clean/entsoe.parquet.
+
+    NaN on gaps, except solar: the TSO omits night quarters (PV is zero),
+    so a partial solar series is completed with 0. Missing files stay NaN.
+    """
     import pandas as pd
 
-    from delukit.core.clean import frame, master_index, raw_days, write_clean
+    from delukit.core.clean import (
+        frame,
+        master_index,
+        quarter_grid,
+        raw_days,
+        write_clean,
+    )
 
     days = days or raw_days()
     columns = {}
@@ -254,7 +264,12 @@ def to_clean(days=None):
             path = BASE_DIR / day.isoformat() / "entsoe" / category / "data.xml"
             if not path.exists():
                 continue
-            for key, series in _read_file(path).items():
+            result = _read_file(path)
+            solar = result.get("solar_forecast_mw")
+            if solar is not None and sum(pd.notna(v) for v in solar.values()) >= 10:
+                for ts in quarter_grid(day):
+                    solar.setdefault(pd.Timestamp(ts), 0.0)
+            for key, series in result.items():
                 columns.setdefault(key, {}).update(series)
     idx = master_index(days)
     df = frame(idx)

@@ -220,6 +220,11 @@ def to_clean(days=None):
                         }
                     )
     df = pd.DataFrame(rows)
+    # Night radiation arrives as null in some runs, 0.0 in others; null
+    # alongside a valid temperature is night (-> 0). Run-tail nulls
+    # (all fields null) stay NaN.
+    night = df["shortwave_radiation"].isna() & df["temperature_2m"].notna()
+    df.loc[night, "shortwave_radiation"] = 0.0
     df["timestamp_berlin"] = pd.to_datetime(df["timestamp_utc"]).dt.tz_convert(BERLIN)
     df = df.set_index("timestamp_utc").sort_index()
     path = write_clean(df, "weather")
