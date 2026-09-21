@@ -246,6 +246,33 @@ def infer_gate(now: datetime | None = None) -> tuple[date, str]:
     return berlin.date() - timedelta(days=1), GATE_1130
 
 
+def write_gate_plots(day: date, gate: str, span: str | None = None) -> None:
+    """Model-band plots next to the forecast parquets (no truth needed)."""
+    from openstef_beam.analysis.plots import ForecastTimeSeriesPlotter
+
+    spans = (span,) if span is not None else SPANS
+    for s in spans:
+        outdir = FORECAST_DIR / day.isoformat() / f"{gate}_{s}"
+        if not outdir.is_dir():
+            continue
+        for path in sorted(outdir.glob("*__*.parquet")):
+            target, sep, used = path.stem.rpartition("__")
+            if not sep or not target or not used:
+                continue
+            frame = pd.read_parquet(path)
+            quantiles = [c for c in frame.columns if c.startswith("quantile_")]
+            median = next((c for c in quantiles if "P50" in c), None)
+            if median is None:
+                continue
+            name = f"{target} {day} {gate} {s} [{used}]"
+            ForecastTimeSeriesPlotter().add_model(
+                model_name=name,
+                forecast=frame[median],
+                quantiles=frame[quantiles],
+            ).plot(title=name).write_html(outdir / f"{target}__{used}.html")
+            print(f"plot {day} {gate} {s} {target} -> {target}__{used}.html")
+
+
 def run_gate(
     day: date, gate: str, span: str, targets: tuple[str, ...], *, registry: bool
 ) -> None:
@@ -256,6 +283,9 @@ def run_gate(
         forecast, used = predict_with_fallback(
             target, gate, span, day, registry=registry
         )
+        for stale in outdir.glob(f"{target}__*.parquet"):
+            if stale.name != f"{target}__{used}.parquet":
+                stale.unlink()
         path = outdir / f"{target}__{used}.parquet"
         tmp = path.with_suffix(".tmp")
         forecast.to_parquet(tmp)
@@ -263,6 +293,7 @@ def run_gate(
         print(
             f"forecast {day} {gate} {span} {target}: {used}, {len(forecast.data)} rows -> {path}"
         )
+    write_gate_plots(day, gate, span)
 
 
 def main() -> None:
