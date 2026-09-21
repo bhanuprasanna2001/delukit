@@ -8,6 +8,7 @@ TIMEZONE = "Europe/Berlin"
 
 BASE_DIR = Path("data/raw")
 CLEAN_DIR = Path("data/clean")
+VERSIONED_DIR = Path("data/versioned")
 
 # Days with no local file yet are always fetched. Files younger than this are
 # re-fetched every run because providers revise recent data in place.
@@ -67,6 +68,7 @@ __all__ = [
     "SMARD_URL",
     "START",
     "TIMEZONE",
+    "VERSIONED_DIR",
     "WEATHER_FIELDS",
     "WEATHER_FORECAST_DAYS",
     "WEATHER_LOCATIONS",
