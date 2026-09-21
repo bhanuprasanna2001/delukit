@@ -91,6 +91,8 @@ def _download(session, group, day):
         if response.status_code in (500, 502, 503, 504) and attempt < MAX_RETRIES:
             time.sleep(2**attempt)
             continue
+        if response.status_code == 400:  # unavailable run, let _parse map to no_data
+            return response.content
         response.raise_for_status()
         return response.content
     raise RateLimited(f"{group} {day}")

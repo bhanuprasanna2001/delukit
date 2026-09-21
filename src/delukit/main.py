@@ -58,6 +58,23 @@ def show_header(end):
     print(bar)
 
 
+def show_summary(counts):
+    head = f"  {'source':<10}{'new':>5}{'upd':>5}{'same':>6}{'empty':>7}{'fail':>6}"
+    body = [head] + [
+        f"  {source:<10}{counts[source]['fetched']:>5}"
+        f"{counts[source]['updated']:>5}{counts[source]['unchanged']:>6}"
+        f"{counts[source]['no_data']:>7}{counts[source]['failed']:>6}"
+        for source in SOURCES
+    ]
+    width = max(len(line) for line in body)
+    bar = "=" * width
+    print(bar)
+    print("  // DELUKIT :: summary //")
+    print("-" * width)
+    print("\n".join(body))
+    print(bar)
+
+
 def main():
     log = setup_logging()
     end = end_date()
@@ -94,7 +111,14 @@ def main():
         for thread in threads:
             thread.join()
 
-    log.info(counts)
+    show_summary(counts)
+    for source in SOURCES:
+        c = counts[source]
+        log.info(
+            "summary %s: new=%d upd=%d same=%d empty=%d fail=%d",
+            source, c["fetched"], c["updated"], c["unchanged"],
+            c["no_data"], c["failed"],
+        )
 
 
 if __name__ == "__main__":
