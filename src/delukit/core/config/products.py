@@ -175,8 +175,10 @@ PREDICT_CONTEXT = timedelta(days=14)
 # Below this completeness the primary refuses and the fallback chain runs.
 COMPLETENESS_THRESHOLD = 0.5
 
-# Backtest replay mirrors operations: daily gate, weekly retrain.
-TRAINING_CONTEXT = timedelta(days=90)
+# Backtest replay mirrors operations: daily gate, weekly retrain, all history
+# (None = unbounded, like production fits; the event generator clamps the
+# window to the data start, and the backtest CLI can bound it for experiments).
+TRAINING_DAYS: int | None = None
 TRAIN_INTERVAL = timedelta(days=7)
 PREDICT_CONTEXT_MIN_COVERAGE = 0.5
 TRAINING_CONTEXT_MIN_COVERAGE = 0.5

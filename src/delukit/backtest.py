@@ -32,11 +32,15 @@ from delukit.core.config.products import (
     SPAN_D1,
     SPANS,
     TRAIN_INTERVAL,
-    TRAINING_CONTEXT,
+    TRAINING_DAYS,
     TUNING_DIR,
 )
 from delukit.dataset import load
 from delukit.forecast import GATE_WALL, create_workflow, workflow_config
+
+# Unbounded training for the event generator (timedelta-only field): clamped
+# to the data start inside BacktestEventGenerator, i.e. all history.
+ALL_HISTORY = timedelta(days=365 * 30)
 
 # Shortest forecast the event generator still schedules (gates near `end`
 # emit partial predictions; missing truth simply drops out of the join).
@@ -77,9 +81,14 @@ def run_backtest(
     end: datetime,
     *,
     train_interval: timedelta = TRAIN_INTERVAL,
+    training_days: int | None = TRAINING_DAYS,
     tuned: bool = False,
 ) -> TimeSeriesDataset:
-    """Replay the gate daily; return predictions with available_at = gate."""
+    """Replay the gate daily; return predictions with available_at = gate.
+
+    Each weekly refit trains on all history (like production fits); pass
+    training_days to bound the window for experiments.
+    """
     ds = load()
     ground_truth, predictors = split_target(ds, target)
 
@@ -97,7 +106,9 @@ def run_backtest(
             predict_min_length=PREDICT_MIN_LENGTH,
             predict_context_length=PREDICT_CONTEXT,
             predict_context_min_coverage=COVERAGE,
-            training_context_length=TRAINING_CONTEXT,
+            training_context_length=timedelta(days=training_days)
+            if training_days is not None
+            else ALL_HISTORY,
             training_context_min_coverage=COVERAGE,
         ),
         workflow_template=create_workflow(target, gate, span, config=config),
@@ -134,9 +145,10 @@ def split_bands(
     """One band per lead day: rows whose Berlin target day is gate_day + k.
 
     Per-day buckets are required because EvaluationPipeline.select_version()
-    keeps only the freshest forecast per timestamp: a multi-day band would
+    dedups each timestamp to a single forecast: a multi-day band would
     silently re-score the day-ahead version of every timestamp instead of
-    the 2-10-day-ahead skill it claims to measure.
+    the 2-10-day-ahead skill it claims to measure. Bucketing first makes
+    every timestamp unique per band, so the dedup is a no-op.
     """
     frame = predictions.data
     gate_day = frame["available_at"].dt.tz_convert(BERLIN).dt.date
@@ -286,6 +298,12 @@ def main() -> None:
     parser.add_argument("--end", default=None, help="Berlin day YYYY-MM-DD")
     parser.add_argument("--train-interval-days", type=int, default=7)
     parser.add_argument(
+        "--training-days",
+        type=int,
+        default=None,
+        help="bound the refit window (default: all history, like production)",
+    )
+    parser.add_argument(
         "--from-predictions",
         action="store_true",
         help="skip refit, reuse saved predictions",
@@ -320,6 +338,7 @@ def main() -> None:
             start,
             end,
             train_interval=timedelta(days=args.train_interval_days),
+            training_days=args.training_days,
             tuned=args.tuned,
         )
     ground_truth, _ = split_target(load(), args.target)
