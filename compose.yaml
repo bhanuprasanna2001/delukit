@@ -1,0 +1,21 @@
+services:
+  delukit:
+    build: .
+    image: delukit:local
+    init: true
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Berlin
+      DAGSTER_HOME: /app/data/.dagster
+      DELUKIT_ALERT_WEBHOOK: ${DELUKIT_ALERT_WEBHOOK:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

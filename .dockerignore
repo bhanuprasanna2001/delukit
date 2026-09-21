@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+.git/
+.ruff_cache/
+.pytest_cache/
+.vscode/
+.idea/
+.agents/
+data/
+.env
+.env.*
+.DS_Store
+opencode.json
