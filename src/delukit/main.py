@@ -7,15 +7,24 @@ from delukit.core import (
     REFRESH_DAYS,
     START,
     end_date,
-    entsoe_params,
     setup_logging,
-    smard_modules,
     sync_progress,
 )
+from delukit.core.config.entsoe import entsoe_params
+from delukit.core.config.smard import smard_modules
+from delukit.core.config.weather import (
+    WEATHER_FORECAST_DAYS,
+    WEATHER_LOCATIONS,
+    WEATHER_MODEL,
+)
 from delukit.core.log import LOG_FILE
-from delukit.sources import entsoe, smard
+from delukit.sources import entsoe, smard, weather
 
-SOURCES = {"entsoe": (entsoe, entsoe_params), "smard": (smard, smard_modules)}
+SOURCES = {
+    "entsoe": (entsoe, entsoe_params),
+    "smard": (smard, smard_modules),
+    "weather": (weather, WEATHER_LOCATIONS),
+}
 
 load_dotenv()
 
@@ -26,10 +35,11 @@ def show_header(end):
         ("Area", "DE-LU"),
         ("Window", f"{START} -> {end}"),
         ("Refresh", f"last {REFRESH_DAYS} days re-fetched"),
-        ("Destination", f"{BASE_DIR}/<day>/<source>/<category>/data.xml"),
+        ("Destination", f"{BASE_DIR}/<day>/<source>/<category>/data.*"),
         ("Log", LOG_FILE),
         ("entsoe", ", ".join(entsoe_params)),
         ("smard", ", ".join(smard_modules)),
+        ("weather", f"{WEATHER_MODEL}, {WEATHER_FORECAST_DAYS}d, land+sea"),
     ]
     body = [f"  {label:<11} {value}" for label, value in rows]
     width = max(len(line) for line in body)

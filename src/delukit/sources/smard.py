@@ -13,13 +13,11 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from delukit.core import (
-    BASE_DIR,
-    REFRESH_DAYS,
+from delukit.core.config import BASE_DIR, REFRESH_DAYS, TIMEZONE
+from delukit.core.config.smard import (
     SMARD_REGION,
     SMARD_RESOLUTION,
     SMARD_URL,
-    TIMEZONE,
     smard_modules,
 )
 from delukit.core.parallel import run_parallel

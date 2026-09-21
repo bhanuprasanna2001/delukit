@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from delukit.core import BASE_DIR, ENTSOE_URL, REFRESH_DAYS, TIMEZONE, entsoe_params
+from delukit.core.config import BASE_DIR, REFRESH_DAYS, TIMEZONE
+from delukit.core.config.entsoe import ENTSOE_URL, entsoe_params
 from delukit.core.parallel import RateLimited, run_parallel
 
 log = logging.getLogger(__name__)

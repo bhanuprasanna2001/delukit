@@ -1,3 +1,3 @@
-from delukit.sources import entsoe, smard
+from delukit.sources import entsoe, smard, weather
 
-__all__ = ["entsoe", "smard"]
+__all__ = ["entsoe", "smard", "weather"]
