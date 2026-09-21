@@ -83,17 +83,12 @@ def run_backtest(
     ds = load()
     ground_truth, predictors = split_target(ds, target)
 
-    config = workflow_config(target, gate, span)
-    if tuned:
-        from openstef_models.models.forecasting.xgboost_forecaster import (
-            XGBoostHyperParams,
+    config = workflow_config(target, gate, span, use_tuned=tuned)
+    if tuned and (TUNING_DIR / f"{target}__{gate}__{span}.json").exists():
+        print(
+            f"backtest {target} {gate} {span}: tuned hyperparams from "
+            f"{TUNING_DIR / f'{target}__{gate}__{span}.json'}"
         )
-
-        path = TUNING_DIR / f"{target}__{gate}__{span}.json"
-        config.xgboost_hyperparams = XGBoostHyperParams.model_validate_json(
-            path.read_text()
-        )
-        print(f"backtest {target} {gate} {span}: tuned hyperparams from {path}")
 
     forecaster = OpenSTEF4BacktestForecaster(
         config=BacktestForecasterConfig(

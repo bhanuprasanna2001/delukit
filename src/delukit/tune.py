@@ -38,7 +38,7 @@ def tune_product(
         .filter_by_available_before(cutoff)
         .select_version()
     )
-    config = workflow_config(target, gate, span)
+    config = workflow_config(target, gate, span, use_tuned=False)
     config.xgboost_hyperparams = tuning_hyperparams()
     tuner = HyperparameterTuner(
         config=config,

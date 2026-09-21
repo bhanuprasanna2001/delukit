@@ -51,6 +51,7 @@ from delukit.core.config.products import (
     SPAN_D1,
     SPANS,
     TARGETS,
+    TUNING_DIR,
     energy_price_column,
     feature_exclude,
     mlflow_storage,
@@ -77,9 +78,10 @@ def workflow_config(
     *,
     model: str = PRIMARY_MODEL,
     registry: bool = False,
+    use_tuned: bool = True,
 ) -> ForecastingWorkflowConfig:
     """Preset config for one (target x gate x span) product."""
-    return ForecastingWorkflowConfig(
+    config = ForecastingWorkflowConfig(
         model_id=model_id(target, gate, span),
         model=model,  # ty: ignore[invalid-argument-type]
         quantiles=QUANTILES,
@@ -104,6 +106,22 @@ def workflow_config(
         mlflow_storage=mlflow_storage() if registry else None,
         tags={"gate": gate, "span": span, "target": target},
     )
+    if use_tuned and model == PRIMARY_MODEL:
+        # ponytail: silent fallback to preset defaults; a missing/corrupt
+        # tuning file must never fail a gate run.
+        try:
+            from openstef_models.models.forecasting.xgboost_forecaster import (
+                XGBoostHyperParams,
+            )
+
+            path = TUNING_DIR / f"{target}__{gate}__{span}.json"
+            if path.exists():
+                config.xgboost_hyperparams = XGBoostHyperParams.model_validate_json(
+                    path.read_text()
+                )
+        except (OSError, ValueError):
+            pass
+    return config
 
 
 def create_workflow_from_config(
@@ -143,13 +161,17 @@ def create_workflow(
     model: str = PRIMARY_MODEL,
     registry: bool = False,
     config: ForecastingWorkflowConfig | None = None,
+    use_tuned: bool = True,
 ) -> CustomForecastingWorkflow:
     """Assemble one product workflow; XGBoost gets real thread count."""
     # Only the primary forecaster is calibrated: fallback outputs are
     # constant by design, and calibrating them adds failure modes for nothing.
     calibrate = model == PRIMARY_MODEL
     return create_workflow_from_config(
-        config or workflow_config(target, gate, span, model=model, registry=registry),
+        config
+        or workflow_config(
+            target, gate, span, model=model, registry=registry, use_tuned=use_tuned
+        ),
         calibrate=calibrate,
     )
 
