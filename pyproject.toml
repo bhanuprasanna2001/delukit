@@ -8,6 +8,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "dagster>=1.13.23",
+    "dagster-webserver>=1.13.23",
     "openstef>=4.4.2",
     "optuna>=5.0.0",
     "pandas>=3.0.6",
