@@ -26,8 +26,13 @@ def sync_progress(totals):
             for source, total in totals.items()
         }
         counts = {
-            source: {"fetched": 0, "updated": 0, "unchanged": 0, "no_data": 0,
-                     "failed": 0}
+            source: {
+                "fetched": 0,
+                "updated": 0,
+                "unchanged": 0,
+                "no_data": 0,
+                "failed": 0,
+            }
             for source in totals
         }
 

@@ -193,9 +193,7 @@ def to_clean(days=None):
     days = days or raw_days()
     rows = []
     for day in days:
-        available_at = pd.Timestamp(
-            datetime(day.year, day.month, day.day, tzinfo=UTC)
-        )
+        available_at = pd.Timestamp(datetime(day.year, day.month, day.day, tzinfo=UTC))
         for group, locations in WEATHER_LOCATIONS.items():
             path = BASE_DIR / day.isoformat() / "weather" / group / "data.json"
             if not path.exists():
@@ -213,10 +211,7 @@ def to_clean(days=None):
                             "group": group,
                             "latitude": record["latitude"],
                             "longitude": record["longitude"],
-                            **{
-                                field: hourly[field][i]
-                                for field in WEATHER_FIELDS
-                            },
+                            **{field: hourly[field][i] for field in WEATHER_FIELDS},
                         }
                     )
     df = pd.DataFrame(rows)
@@ -225,7 +220,9 @@ def to_clean(days=None):
     # maps fold=0, leaving a 1h gap downstream ffill covers (limit 96 quarters).
     # ponytail: hourly wall-time API can't represent both folds; UTC-native
     # hourly+minute API if this gap ever matters.
-    df = df.drop_duplicates(subset=["run_day", "location", "timestamp_utc"], keep="last")
+    df = df.drop_duplicates(
+        subset=["run_day", "location", "timestamp_utc"], keep="last"
+    )
     # Night radiation arrives as null in some runs, 0.0 in others; null
     # alongside a valid temperature is night (-> 0). Run-tail nulls
     # (all fields null) stay NaN.

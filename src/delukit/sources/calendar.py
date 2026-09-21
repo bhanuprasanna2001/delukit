@@ -113,9 +113,7 @@ def _dates(record):
 def _subdivisions(record):
     subs = record.get("subdivisions") or []
     if not isinstance(subs, list) or not all(
-        isinstance(entry, dict)
-        and isinstance(entry.get("code"), str)
-        and entry["code"]
+        isinstance(entry, dict) and isinstance(entry.get("code"), str) and entry["code"]
         for entry in subs
     ):
         raise TypeError("holiday subdivisions must be [{code}]")
@@ -271,8 +269,9 @@ def fetch_day(category, day, today=None, session=None):
             for record in _year_records(session, "school", iso, year, today)
         ]
         body = (
-            json.dumps(_document(iso, day, public, school), sort_keys=True, indent=2)
-            .encode()
+            json.dumps(
+                _document(iso, day, public, school), sort_keys=True, indent=2
+            ).encode()
             + b"\n"
         )
     finally:

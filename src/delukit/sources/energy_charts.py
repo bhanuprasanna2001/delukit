@@ -49,7 +49,9 @@ def _download(session, day):
         if response.status_code == 429:
             if attempt == MAX_RETRIES:
                 raise RateLimited(f"day_ahead_price {day}")
-            log.warning("rate limited, sleeping %ss: day_ahead_price %s", RETRY_GAP, day)
+            log.warning(
+                "rate limited, sleeping %ss: day_ahead_price %s", RETRY_GAP, day
+            )
             time.sleep(RETRY_GAP)
             continue
         if response.status_code in (500, 502, 503, 504) and attempt < MAX_RETRIES:
@@ -118,7 +120,9 @@ def sync(start, end, on_each=None):
     day = start
     while day <= end:
         for category in energy_charts_categories:
-            if (BASE_DIR / day.isoformat() / "energy_charts" / category / "data.json").exists():
+            if (
+                BASE_DIR / day.isoformat() / "energy_charts" / category / "data.json"
+            ).exists():
                 skipped += 1
                 if on_each:
                     on_each(category, day, "unchanged")

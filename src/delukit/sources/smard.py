@@ -205,7 +205,10 @@ def to_clean(days=None):
                 if len(values) < len(grid):
                     log.warning(
                         "smard %s %s: only %d values for %d quarters",
-                        category, day, len(values), len(grid),
+                        category,
+                        day,
+                        len(values),
+                        len(grid),
                     )
                 series = columns.setdefault(name, {})
                 for stamp, detail in zip(grid, values):

@@ -120,8 +120,12 @@ def main():
         c = counts[source]
         log.info(
             "summary %s: new=%d upd=%d same=%d empty=%d fail=%d",
-            source, c["fetched"], c["updated"], c["unchanged"],
-            c["no_data"], c["failed"],
+            source,
+            c["fetched"],
+            c["updated"],
+            c["unchanged"],
+            c["no_data"],
+            c["failed"],
         )
 
 
