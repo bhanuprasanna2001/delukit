@@ -20,6 +20,17 @@ def end_date():
 
 
 # Back-compat: `from delukit.core.config import <SOURCE_...>` keeps working.
+from delukit.core.config.calendar import (
+    OPENHOLIDAYS_CACHE_DIR,
+    OPENHOLIDAYS_PUBLIC_URL,
+    OPENHOLIDAYS_SCHOOL_URL,
+    calendar_countries,
+)
+from delukit.core.config.energy_charts import (
+    ENERGY_CHARTS_BZN,
+    ENERGY_CHARTS_URL,
+    energy_charts_categories,
+)
 from delukit.core.config.entsoe import (
     ENTSOE_AREA,
     ENTSOE_URL,
@@ -41,8 +52,13 @@ from delukit.core.config.weather import (
 
 __all__ = [
     "BASE_DIR",
+    "ENERGY_CHARTS_BZN",
+    "ENERGY_CHARTS_URL",
     "ENTSOE_AREA",
     "ENTSOE_URL",
+    "OPENHOLIDAYS_CACHE_DIR",
+    "OPENHOLIDAYS_PUBLIC_URL",
+    "OPENHOLIDAYS_SCHOOL_URL",
     "REFRESH_DAYS",
     "SMARD_REGION",
     "SMARD_RESOLUTION",
@@ -54,7 +70,9 @@ __all__ = [
     "WEATHER_LOCATIONS",
     "WEATHER_MODEL",
     "WEATHER_URL",
+    "calendar_countries",
     "end_date",
+    "energy_charts_categories",
     "entsoe_params",
     "smard_modules",
 ]

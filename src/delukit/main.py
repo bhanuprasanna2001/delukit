@@ -10,6 +10,7 @@ from delukit.core import (
     setup_logging,
     sync_progress,
 )
+from delukit.core.config.calendar import calendar_countries
 from delukit.core.config.entsoe import entsoe_params
 from delukit.core.config.smard import smard_modules
 from delukit.core.config.weather import (
@@ -18,12 +19,17 @@ from delukit.core.config.weather import (
     WEATHER_MODEL,
 )
 from delukit.core.log import LOG_FILE
-from delukit.sources import entsoe, smard, weather
+from delukit.sources import calendar, entsoe, smard, weather
+
+# energy_charts is implemented (sources/energy_charts.py, standalone-runnable)
+# but not synced until downstream needs it; enable with:
+#   "energy_charts": (energy_charts, energy_charts_categories),
 
 SOURCES = {
     "entsoe": (entsoe, entsoe_params),
     "smard": (smard, smard_modules),
     "weather": (weather, WEATHER_LOCATIONS),
+    "calendar": (calendar, calendar_countries),
 }
 
 load_dotenv()
@@ -40,6 +46,7 @@ def show_header(end):
         ("entsoe", ", ".join(entsoe_params)),
         ("smard", ", ".join(smard_modules)),
         ("weather", f"{WEATHER_MODEL}, {WEATHER_FORECAST_DAYS}d, land+sea"),
+        ("calendar", f"OpenHolidays {', '.join(calendar_countries)}"),
     ]
     body = [f"  {label:<11} {value}" for label, value in rows]
     width = max(len(line) for line in body)
