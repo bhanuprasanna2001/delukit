@@ -182,17 +182,15 @@ def fit_product(
     span: str,
     *,
     model: str = PRIMARY_MODEL,
-    train_days: int = 180,
+    train_days: int | None = None,
     registry: bool = False,
 ) -> CustomForecastingWorkflow | None:
-    """Fit on trailing history as known now. None when the registry skips."""
+    """Fit on all history as known now. None when the registry skips."""
     now = datetime.now(UTC)
-    data = (
-        load()
-        .filter_by_range(now - timedelta(days=train_days), now)
-        .filter_by_available_before(now)
-        .select_version()
-    )
+    ds = load()
+    if train_days is not None:
+        ds = ds.filter_by_range(now - timedelta(days=train_days), now)
+    data = ds.filter_by_available_before(now).select_version()
     workflow = create_workflow(target, gate, span, model=model, registry=registry)
     workflow.fit(data)
     return workflow if workflow.model.is_fitted else None

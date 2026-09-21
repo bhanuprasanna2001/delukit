@@ -28,16 +28,14 @@ from delukit.forecast import (
 
 
 def tune_product(
-    target: str, gate: str, span: str, *, n_trials: int = 10, train_days: int = 180
+    target: str, gate: str, span: str, *, n_trials: int = 10, train_days: int | None = None
 ):
-    """Tune on trailing history; persist the winning hyperparams."""
+    """Tune on all history; persist the winning hyperparams."""
     cutoff = datetime.now(UTC)
-    train_data = (
-        load()
-        .filter_by_range(cutoff - timedelta(days=train_days), cutoff)
-        .filter_by_available_before(cutoff)
-        .select_version()
-    )
+    ds = load()
+    if train_days is not None:
+        ds = ds.filter_by_range(cutoff - timedelta(days=train_days), cutoff)
+    train_data = ds.filter_by_available_before(cutoff).select_version()
     config = workflow_config(target, gate, span, use_tuned=False)
     config.xgboost_hyperparams = tuning_hyperparams()
     tuner = HyperparameterTuner(
@@ -68,7 +66,7 @@ def main() -> None:
     parser.add_argument("--gate", choices=sorted(GATE_WALL), default="0530")
     parser.add_argument("--span", choices=list(SPANS), default=SPAN_D1)
     parser.add_argument("--n-trials", type=int, default=10)
-    parser.add_argument("--train-days", type=int, default=180)
+    parser.add_argument("--train-days", type=int, default=None)
     args = parser.parse_args()
 
     tune_product(
