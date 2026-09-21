@@ -14,6 +14,7 @@ from openstef_beam.backtesting.backtest_forecaster import BacktestForecasterConf
 from openstef_beam.benchmarking.baselines.openstef4 import OpenSTEF4BacktestForecaster
 from openstef_beam.evaluation import EvaluationConfig, EvaluationPipeline, Window
 from openstef_beam.evaluation.metric_providers import (
+    ObservedProbabilityProvider,
     RCRPSProvider,
     RelativePinballLossProvider,
     RMAEProvider,
@@ -328,6 +329,97 @@ def main() -> None:
         )
     ground_truth, _ = split_target(load(), args.target)
     evaluate(args.target, args.gate, args.span, predictions, ground_truth)
+
+
+def score_gate(day: date, gate: str) -> list[dict]:
+    """Score stored gate forecasts against arrived actuals; append to scores.
+
+    Reads data/forecasts/<day>/<gate>_<span>/*.parquet, joins each target
+    with ground truth, and appends one row per (span, target) to the running
+    data/scores/scores.parquet table (deduplicated, so re-runs are safe).
+    Rows whose target days are not yet complete simply have no truth to join
+    and are skipped.
+    """
+    from openstef_core.datasets import ForecastDataset
+
+    from delukit.core.config.products import FORECAST_DIR, SCORES_DIR, SPANS
+    from delukit.dataset import QUARTER
+
+    ds = load()
+    rows = []
+    for span in SPANS:
+        outdir = FORECAST_DIR / day.isoformat() / f"{gate}_{span}"
+        if not outdir.is_dir():
+            continue
+        # One file per (target x model); re-runs with a different fallback
+        # leave stale files behind, so score only the newest per target.
+        newest = {}
+        for path in sorted(outdir.glob("*__*.parquet")):
+            target, sep, _ = path.stem.rpartition("__")
+            if not sep or not target:
+                continue
+            cur = newest.get(target)
+            if cur is None or path.stat().st_mtime > cur.stat().st_mtime:
+                newest[target] = path
+        for target, path in sorted(newest.items()):
+            _, _, used = path.stem.rpartition("__")
+            frame = pd.read_parquet(path)
+            quantile_cols = [c for c in frame.columns if "quantile_" in c]
+            try:
+                part = next(p for p in ds.data_parts if target in p.feature_names)
+            except StopIteration:
+                continue
+            truth = part.select_version().data[[target]].dropna()
+            joined = frame[quantile_cols].join(truth, how="inner").dropna()
+            if joined.empty:
+                continue
+            subset = ForecastDataset(
+                joined, sample_interval=QUARTER, target_column=target
+            )
+
+            def _frame(metric) -> pd.DataFrame:
+                frame = metric.to_dataframe()
+                return frame.set_index(frame["quantile"].astype(str))
+
+            rmae = _frame(RMAEProvider(quantiles=[Q(0.5)])(subset)).loc["0.5", "rMAE"]
+            rcrps = _frame(RCRPSProvider()(subset)).loc["global", "rCRPS"]
+            observed = _frame(ObservedProbabilityProvider()(subset))[
+                "observed_probability"
+            ].to_dict()
+            rows.append(
+                {
+                    "day": day.isoformat(),
+                    "gate": gate,
+                    "span": span,
+                    "target": target,
+                    "model": used,
+                    "n": len(joined),
+                    "rmae": float(rmae),
+                    "rcrps": float(rcrps),
+                    "obs_p10": float(observed.get("0.1", float("nan"))),
+                    "obs_p50": float(observed.get("0.5", float("nan"))),
+                    "obs_p90": float(observed.get("0.9", float("nan"))),
+                }
+            )
+    if rows:
+        SCORES_DIR.mkdir(parents=True, exist_ok=True)
+        table_path = SCORES_DIR / "scores.parquet"
+        table = pd.concat(
+            [
+                pd.read_parquet(table_path)
+                if table_path.exists()
+                else pd.DataFrame(rows).iloc[0:0],
+                pd.DataFrame(rows),
+            ]
+        )
+        table = table.drop_duplicates(
+            subset=["day", "gate", "span", "target"], keep="last"
+        ).sort_values(["day", "gate", "span", "target"])
+        tmp = table_path.with_suffix(".tmp")
+        table.to_parquet(tmp)
+        tmp.replace(table_path)
+    print(f"scores {day} {gate}: {len(rows)} products scored")
+    return rows
 
 
 if __name__ == "__main__":
