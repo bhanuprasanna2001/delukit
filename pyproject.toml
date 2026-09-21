@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "openstef>=4.4.2",
+    "optuna>=5.0.0",
     "pandas>=3.0.6",
     "pyarrow>=25.0.1",
     "python-dotenv>=1.2.3",
@@ -22,6 +23,7 @@ delukit-clean = "delukit.clean:main"
 delukit-dataset = "delukit.dataset:main"
 delukit-forecast = "delukit.forecast:main"
 delukit-backtest = "delukit.backtest:main"
+delukit-tune = "delukit.tune:main"
 
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]
