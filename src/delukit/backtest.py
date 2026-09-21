@@ -372,15 +372,17 @@ def score_gate(day: date, gate: str) -> list[dict]:
                 joined, sample_interval=QUARTER, target_column=target
             )
 
-            def _frame(metric) -> pd.DataFrame:
-                frame = metric.to_dataframe()
-                return frame.set_index(frame["quantile"].astype(str))
+            def _pick(out: dict, key: str, name: str) -> float:
+                # Providers return {quantile: {metric: value}} keyed by
+                # Quantile objects (repr "0.5") or "global".
+                return float(next(v[name] for k, v in out.items() if str(k) == key))
 
-            rmae = _frame(RMAEProvider(quantiles=[Q(0.5)])(subset)).loc["0.5", "rMAE"]
-            rcrps = _frame(RCRPSProvider()(subset)).loc["global", "rCRPS"]
-            observed = _frame(ObservedProbabilityProvider()(subset))[
-                "observed_probability"
-            ].to_dict()
+            rmae = _pick(RMAEProvider(quantiles=[Q(0.5)])(subset), "0.5", "rMAE")
+            rcrps = _pick(RCRPSProvider()(subset), "global", "rCRPS")
+            observed = {
+                str(k): v["observed_probability"]
+                for k, v in ObservedProbabilityProvider()(subset).items()
+            }
             rows.append(
                 {
                     "day": day.isoformat(),
