@@ -1,4 +1,4 @@
-import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut, Zap } from "lucide-react";
+import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import { KeyReveal } from "./components/KeyReveal";
 import { Button } from "./components/ui/button";
@@ -114,9 +114,7 @@ export default function App() {
               onClick={() => setView("forecasts")}
               className="flex cursor-pointer items-center gap-2"
             >
-              <span className="flex size-8 items-center justify-center rounded-md bg-brand text-white">
-                <Zap className="size-4" />
-              </span>
+              <img src="/delu.svg" alt="DELU logo" className="size-8 rounded-md" />
               <span className="font-display text-lg font-bold tracking-tight">
                 DELU
               </span>
