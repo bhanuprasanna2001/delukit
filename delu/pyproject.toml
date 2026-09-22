@@ -26,5 +26,14 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
 
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+required-version = "0.16.8"
+
 [tool.ruff.lint]
-ignore = ["B008"]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF", "BLE"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]

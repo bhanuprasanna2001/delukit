@@ -167,7 +167,7 @@ def _forecast(day, gate, span, target, kind) -> dict:
     try:
         return forecasts.load(day, gate, span, target, kind)
     except forecasts.Missing as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/forecast")
@@ -264,9 +264,9 @@ def api_export(
             start, end, target, gate, kind, tz, horizon_days, format
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except forecasts.Missing as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     # ponytail: whole file in memory; ~5MB at 75 days, stream from disk if bigger.
     return Response(
         data,
@@ -289,7 +289,9 @@ def contact(body: ContactIn, request: Request) -> dict:
     if not _auth.EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Enter a valid email address.")
     if len(message) < 10:
-        raise HTTPException(status_code=400, detail="Write a message of 10+ characters.")
+        raise HTTPException(
+            status_code=400, detail="Write a message of 10+ characters."
+        )
     if len(message) > 4000:
         raise HTTPException(status_code=400, detail="Keep it under 4000 characters.")
     if not topic:
@@ -314,11 +316,11 @@ def signup(body: Signup, request: Request) -> dict:
     try:
         auth.check_throttle(f"signup:{ip}")
     except ValueError as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     try:
         user_id = auth.signup(body.email, body.password)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     auth.note_ok(f"signup:{ip}")
     token = auth.issue_verify_token(user_id)
     send_verify(body.email.strip().lower(), f"{PUBLIC_URL}/?verify={token}")
@@ -355,7 +357,7 @@ def login(body: Login, request: Request, response: Response) -> dict:
     try:
         auth.check_throttle(gate)
     except ValueError as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     token = auth.login(body.email, body.password)
     if token is None:
         auth.note_fail(gate)
@@ -375,9 +377,7 @@ def login(body: Login, request: Request, response: Response) -> dict:
 
 
 @app.post("/auth/logout")
-def logout(
-    response: Response, delu_session: str | None = Cookie(default=None)
-) -> dict:
+def logout(response: Response, delu_session: str | None = Cookie(default=None)) -> dict:
     if delu_session:
         auth.logout(delu_session)
     response.delete_cookie(auth.SESSION_COOKIE)
@@ -404,12 +404,12 @@ def delete_account(
     try:
         auth.check_throttle(gate)
     except ValueError as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     try:
         auth.delete_account(user["id"], body.password)
     except ValueError as exc:
         auth.note_fail(gate)
-        raise HTTPException(status_code=401, detail=str(exc))
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     auth.note_ok(gate)
     response.delete_cookie(auth.SESSION_COOKIE)
     return {"ok": True}

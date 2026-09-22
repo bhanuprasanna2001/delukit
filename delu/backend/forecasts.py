@@ -59,7 +59,9 @@ def _actual_series(target: str) -> pd.Series | None:
     if target in SMARD_TARGETS:
         return pd.read_parquet(ACTUALS_DIR / "smard.parquet", columns=[target])[target]
     if target == "gen_actual_total_mwh":
-        frame = pd.read_parquet(ACTUALS_DIR / "smard.parquet", columns=list(GEN_TOTAL_COLUMNS))
+        frame = pd.read_parquet(
+            ACTUALS_DIR / "smard.parquet", columns=list(GEN_TOTAL_COLUMNS)
+        )
         return frame.sum(axis=1, min_count=1)
     return None
 
@@ -72,11 +74,7 @@ def options() -> dict:
     runs: dict[str, dict[str, list[str]]] = {}
     for day in dates:
         for span in SPANS:
-            gates = [
-                g
-                for g in GATES
-                if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()
-            ]
+            gates = [g for g in GATES if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()]
             if gates:
                 runs.setdefault(day, {})[span] = gates
         for path in (FORECASTS_DIR / day).glob("*/*__*.parquet"):
@@ -107,11 +105,7 @@ def resolve(day: str | None, gate: str | None, span: str, target: str):
     day = day or opts["dates"][-1]
     if span not in SPANS:
         raise Missing(f"Span must be one of {SPANS}.")
-    present = [
-        g
-        for g in GATES
-        if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()
-    ]
+    present = [g for g in GATES if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()]
     if not present:
         raise Missing(f"No {span} forecast for {day}.")
     gate = gate or ("1130" if "1130" in present else present[-1])
@@ -140,8 +134,8 @@ def _origin_moment(day: str, gate: str) -> datetime:
         return datetime.strptime(day, "%Y-%m-%d").replace(
             hour=hh, minute=mm, tzinfo=ZoneInfo("Europe/Berlin")
         )
-    except ValueError:
-        raise ValueError("Dates are YYYY-MM-DD.")
+    except ValueError as exc:
+        raise ValueError("Dates are YYYY-MM-DD.") from exc
 
 
 def export_frame(
@@ -164,8 +158,8 @@ def export_frame(
         raise ValueError("Horizon is 1 to 10 days ahead.")
     try:
         s, e = date.fromisoformat(start), date.fromisoformat(end)
-    except ValueError:
-        raise ValueError("Dates are YYYY-MM-DD.")
+    except ValueError as exc:
+        raise ValueError("Dates are YYYY-MM-DD.") from exc
     if e < s:
         raise ValueError("End is before start.")
     if (e - s).days > MAX_EXPORT_DAYS:
@@ -265,8 +259,12 @@ def load(day: str, gate: str, span: str, target: str, kind: str) -> dict:
         idx = frame.index
         actual = pd.Series(dtype="float64").reindex(idx)
 
-    qt = lambda c: [None if pd.isna(v) else float(v) for v in frame[c]]
-    av = lambda s: [None if pd.isna(v) else float(v) for v in s]
+    def qt(c):
+        return [None if pd.isna(v) else float(v) for v in frame[c]]
+
+    def av(s):
+        return [None if pd.isna(v) else float(v) for v in s]
+
     out = {
         "meta": {
             "date": day,

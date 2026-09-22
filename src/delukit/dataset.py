@@ -277,7 +277,11 @@ def validate() -> int:
     """Replay the gates over history and assert the availability contract."""
     ds = load()
     parts = dict(
-        zip((p.stem for p in sorted(VERSIONED_DIR.glob("*.parquet"))), ds.data_parts)
+        zip(
+            (p.stem for p in sorted(VERSIONED_DIR.glob("*.parquet"))),
+            ds.data_parts,
+            strict=True,
+        )
     )
 
     days, skipped = _validation_days(parts)

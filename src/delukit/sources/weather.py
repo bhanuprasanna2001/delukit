@@ -198,7 +198,9 @@ def to_clean(days=None):
             path = BASE_DIR / day.isoformat() / "weather" / group / "data.json"
             if not path.exists():
                 continue
-            for (name, _, _), record in zip(locations, json.loads(path.read_bytes())):
+            for (name, _, _), record in zip(
+                locations, json.loads(path.read_bytes()), strict=True
+            ):
                 hourly = record["hourly"]
                 for i, stamp in enumerate(hourly["time"]):
                     valid_berlin = datetime.fromisoformat(stamp).replace(tzinfo=BERLIN)

@@ -28,7 +28,12 @@ from delukit.forecast import (
 
 
 def tune_product(
-    target: str, gate: str, span: str, *, n_trials: int = 10, train_days: int | None = None
+    target: str,
+    gate: str,
+    span: str,
+    *,
+    n_trials: int = 10,
+    train_days: int | None = None,
 ):
     """Tune on all history; persist the winning hyperparams."""
     cutoff = datetime.now(UTC)

@@ -69,12 +69,12 @@ def _deliver(to: str, subject: str, text: str, reply_to: str = "") -> bool:
     try:
         if _via_resend(to, subject, text, reply_to):
             return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - delivery must never raise; falls through to SMTP
         pass
     try:
         if _via_smtp(to, subject, text, reply_to):
             return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - delivery must never raise; caller logs instead
         pass
     return False
 
@@ -91,9 +91,7 @@ def send_verify(email: str, link: str) -> None:
 
 def send_contact(name: str, sender: str, topic: str, message: str) -> bool:
     """Forward a contact-form message to the inbox. True if handed to mail."""
-    body = (
-        f"From: {name} <{sender}>\nTopic: {topic}\n\n{message}\n"
-    )
+    body = f"From: {name} <{sender}>\nTopic: {topic}\n\n{message}\n"
     ok = _deliver(CONTACT_TO, f"[DELU contact: {topic}] {name}", body, sender)
     if not ok:
         print(f"contact {sender} [{topic}]: {message}", flush=True)

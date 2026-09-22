@@ -7,6 +7,8 @@ is an outage; multi-day bands without bucketing silently re-score d1 skill.
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 
 def test_gate_datetime_is_berlin_gate_in_utc():
     import pandas as pd
@@ -93,12 +95,10 @@ def test_predict_with_fallback_degrades_and_reports(monkeypatch):
 
     monkeypatch.setattr(F, "fit_product", fake_fit)
     monkeypatch.setattr(F, "predict_product", fake_predict)
-    try:
+    with pytest.raises(PredictError) as exc_info:
         F.predict_with_fallback("t", "0530", "d1", date(2026, 1, 5))
-        assert False, "must raise"
-    except PredictError as e:
-        assert "all models failed" in str(e)
-        assert "xgboost" in str(e)
+    assert "all models failed" in str(exc_info.value)
+    assert "xgboost" in str(exc_info.value)
     assert calls[0] == "xgboost"
 
 

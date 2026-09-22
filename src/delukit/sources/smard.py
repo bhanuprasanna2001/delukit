@@ -197,7 +197,7 @@ def to_clean(days=None):
             names = _columns(category, components)
             if isinstance(names, str):
                 names = [names]
-            for name, comp in zip(names, components):
+            for name, comp in zip(names, components, strict=True):
                 # Positional mapping: i-th value is the i-th quarter of the
                 # Berlin day. This survives the duplicated 2am hour on
                 # fall-back days; values past midnight belong to next day.
@@ -211,7 +211,7 @@ def to_clean(days=None):
                         len(grid),
                     )
                 series = columns.setdefault(name, {})
-                for stamp, detail in zip(grid, values):
+                for stamp, detail in zip(grid, values, strict=False):
                     series[stamp] = _number(detail.findtext("Value"))
     idx = master_index(days)
     df = frame(idx)

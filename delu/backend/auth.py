@@ -64,7 +64,7 @@ def signup(email: str, password: str) -> int:
             )
         except Exception as exc:
             if "UNIQUE" in str(exc):
-                raise ValueError("An account with this email already exists.")
+                raise ValueError("An account with this email already exists.") from exc
             raise
         return cur.lastrowid
 
@@ -89,9 +89,7 @@ def consume_verify_token(token: str) -> int | None:
         if row is None:
             return None
         if datetime.fromisoformat(row["expires"]) < _now():
-            cx.execute(
-                "DELETE FROM email_tokens WHERE token_hash = ?", (_sha(token),)
-            )
+            cx.execute("DELETE FROM email_tokens WHERE token_hash = ?", (_sha(token),))
             return None
         cx.execute("UPDATE users SET verified = 1 WHERE id = ?", (row["user_id"],))
         cx.execute("DELETE FROM email_tokens WHERE token_hash = ?", (_sha(token),))
@@ -156,4 +154,8 @@ def session_user(token: str | None):
         ).fetchone()
         if row is None:
             return None
-        return {"id": row["id"], "email": row["email"], "verified": bool(row["verified"])}
+        return {
+            "id": row["id"],
+            "email": row["email"],
+            "verified": bool(row["verified"]),
+        }
