@@ -192,6 +192,8 @@ def _forecast_partition(
 @dg.asset(
     partitions_def=gate_partitions,
     deps=[versioned_data],
+    retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
+    backfill_policy=dg.BackfillPolicy.multi_run(),
     description="One gate run, day-ahead span (registry models, fallback inside).",
 )
 def forecast_d1(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
@@ -201,6 +203,8 @@ def forecast_d1(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 @dg.asset(
     partitions_def=gate_partitions,
     deps=[versioned_data],
+    retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
+    backfill_policy=dg.BackfillPolicy.multi_run(),
     description="One gate run, 10-day span (registry models, fallback inside).",
 )
 def forecast_d10(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
@@ -210,6 +214,8 @@ def forecast_d10(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 @dg.asset(
     partitions_def=gate_partitions,
     deps=[forecast_d1, forecast_d10],
+    retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
+    backfill_policy=dg.BackfillPolicy.multi_run(),
     description="Daily errors of stored forecasts vs arrived actuals.",
 )
 def forecast_scores(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
@@ -265,7 +271,9 @@ def tune_job() -> None:
 @dg.schedule(
     cron_schedule=["30 5 * * *", "30 11 * * *"],
     execution_timezone="Europe/Berlin",
-    target=[forecast_d1, forecast_d10],
+    # upstream() pulls raw -> clean -> versioned into the same run:
+    # target=[forecasts] alone runs forecast-only on stale versioned data.
+    target=dg.AssetSelection.assets(forecast_d1, forecast_d10).upstream(),
 )
 def gate_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest]:
     """Fire both spans for the gate whose wall-clock hour just ticked."""
@@ -315,15 +323,14 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
     """Any failed run -> local alert log + optional webhook. Never raises."""
     import urllib.request
 
-    record = {
-        "time": datetime.now(BERLIN).isoformat(),
-        "job": context.dagster_run.job_name,
-        "run_id": context.dagster_run.run_id,
-        "error": str(context.failure_event.message)[:500]
-        if context.failure_event
-        else "",
-    }
     try:
+        event = getattr(context, "dagster_event", None)
+        record = {
+            "time": datetime.now(BERLIN).isoformat(),
+            "job": context.dagster_run.job_name,
+            "run_id": context.dagster_run.run_id,
+            "error": str(getattr(event, "message", "") or "")[:500],
+        }
         ALERTS_LOG.parent.mkdir(parents=True, exist_ok=True)
         with ALERTS_LOG.open("a") as fh:
             fh.write(json.dumps(record) + "\n")
@@ -349,6 +356,7 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
             )
     except Exception as exc:  # noqa: BLE001 - alerting must never break the sensor
         context.log.warning("alert sink failed: %s", exc)
+        return dg.SkipReason(f"alert sink failed: {exc}")
     context.log.error("run failed: %s (%s)", record["job"], record["run_id"])
     return dg.SkipReason("alert recorded")
 

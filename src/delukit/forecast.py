@@ -20,6 +20,7 @@ from openstef_core.datasets import ForecastDataset
 from openstef_core.exceptions import (
     FlatlinerDetectedError,
     InsufficientlyCompleteError,
+    ModelNotFoundError,
     PredictError,
 )
 from openstef_models.presets import (
@@ -251,7 +252,12 @@ def predict_with_fallback(
             if workflow is None:  # registry skipped the re-fit; load the stored model
                 workflow = create_workflow(target, gate, span, registry=True)
             return predict_product(workflow, target, gate, span, day), model
-        except (FlatlinerDetectedError, InsufficientlyCompleteError, PredictError) as e:
+        except (
+            FlatlinerDetectedError,
+            InsufficientlyCompleteError,
+            PredictError,
+            ModelNotFoundError,
+        ) as e:
             tried.append(f"{model} ({type(e).__name__})")
     raise PredictError(f"all models failed for {target} {gate} {span} {day}: {tried}")
 

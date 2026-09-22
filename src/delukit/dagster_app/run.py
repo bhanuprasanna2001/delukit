@@ -32,8 +32,16 @@ def main() -> None:
     if args.action == "sync":
         dg.materialize([defs.raw_data, defs.clean_data, defs.versioned_data])
     elif args.action == "forecast":
+        # Full chain like the schedule: sync + rebuild before forecasting.
         dg.materialize(
-            [defs.forecast_d1, defs.forecast_d10], partition_key=_key(day, args.gate)
+            [
+                defs.raw_data,
+                defs.clean_data,
+                defs.versioned_data,
+                defs.forecast_d1,
+                defs.forecast_d10,
+            ],
+            partition_key=_key(day, args.gate),
         )
     else:
         dg.materialize([defs.forecast_scores], partition_key=_key(day, args.gate))
