@@ -268,17 +268,7 @@ export default function App() {
             </div>
           ) : null}
             {view === "download" ? (
-              <div className="grid gap-4">
-                <div>
-                  <h1 className="font-display text-2xl font-bold tracking-tight">
-                    Download forecasts
-                  </h1>
-                  <p className="mt-1 text-sm text-ink-soft">
-                    Pick a range, run and format — one file for the DE-LU bidding zone.
-                  </p>
-                </div>
-                <Download me={me ?? null} onSignIn={() => setView("login")} go={setView} />
-              </div>
+              <Download me={me ?? null} onSignIn={() => setView("login")} go={setView} />
             ) : null}
 
             {view === "about" ? (
