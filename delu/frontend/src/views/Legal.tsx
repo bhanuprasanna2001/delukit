@@ -4,19 +4,22 @@ import {
   BadgeCheck,
   CheckCircle2,
   Database,
+  KeyRound,
   Loader2,
   Lock,
   Mail,
+  Quote,
   Scale,
   Send,
   ShieldCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { sendContact } from "../lib/api";
+import { cn } from "../lib/utils";
 
 export const CONTACT_EMAIL = "bhanu.prasanna2001@gmail.com";
 const UPDATED = "September 2026";
@@ -27,7 +30,7 @@ function Hero({ lede }: { lede: string }) {
       <p className="max-w-2xl text-base leading-relaxed text-ink-soft">{lede}</p>
       <p className="flex items-center gap-1.5 text-xs text-ink-faint">
         <BadgeCheck className="size-3.5" />
-        Last updated {UPDATED} · Plain language, no legal fog
+        Last updated {UPDATED}
       </p>
     </div>
   );
@@ -92,7 +95,7 @@ function DataTable({ rows }: { rows: [string, string, string][] }) {
 export function Privacy() {
   return (
     <div className="grid gap-6">
-      <Hero lede="DELU collects the minimum needed to run accounts and the forecast API — nothing else. No analytics, no trackers, no ads. You can delete everything yourself at any time."
+      <Hero lede="DELU stores only what accounts and the forecast API need. No analytics, no trackers, no ads."
       />
 
       <div className="grid gap-4">
@@ -101,23 +104,23 @@ export function Privacy() {
             rows={[
               ["Email address", "Account identity, verification, replies", "Contract · Art. 6(1)(b)"],
               ["Password hash (PBKDF2, 200k rounds)", "Sign-in. The password itself is never stored", "Contract · Art. 6(1)(b)"],
-              ["Email confirmed? + API key id", "Unlock the key, enforce one key per account", "Contract · Art. 6(1)(b)"],
-              ["API call counters (per min / per day)", "Rate limits. Counts only — never call contents", "Legitimate interest · Art. 6(1)(f)"],
-              ["Session cookie (7 days, HttpOnly)", "Keep you signed in. No tracking data", "Strictly necessary"],
-              ["Contact messages", "Answer you, then only as long as the thread needs", "Legitimate interest · Art. 6(1)(f)"],
+              ["Email confirmed? + API key id", "One key per verified account", "Contract · Art. 6(1)(b)"],
+              ["API call counters (per min / per day)", "Rate limits. Counts only, never call contents", "Legitimate interest · Art. 6(1)(f)"],
+              ["Session cookie (7 days, HttpOnly)", "Keeps you signed in. No tracking data", "Strictly necessary"],
+              ["Contact messages", "Replies, kept only while the thread is open", "Legitimate interest · Art. 6(1)(f)"],
             ]}
           />
           <p>
-            Controller: DELU, run by Bhanu Prasanna —{" "}
+            Controller: DELU, run by Bhanu Prasanna,{" "}
             <a className="underline" href={`mailto:${CONTACT_EMAIL}`}>
               {CONTACT_EMAIL}
             </a>
-            . Giving account data is required to use the API; without an email
-            there is no account to verify or key to issue.
+            . An email address is required: without one there is no account
+            to verify or key to issue.
           </p>
         </Section>
 
-        <Section n="02" icon={Send} title="Who else touches your data">
+        <Section n="02" icon={Send} title="Third parties">
           <p>
             Email delivery runs through{" "}
             <a
@@ -129,18 +132,17 @@ export function Privacy() {
               Resend
             </a>{" "}
             (verification mails, contact-form forwarding) under its data
-            processing terms. Nothing else: no analytics scripts, no
-            third-party trackers, no advertising, no sale of personal data —
-            ever.
+            processing terms. No analytics, no trackers, no advertising, no
+            sale of personal data.
           </p>
         </Section>
 
         <Section n="03" icon={Lock} title="How long we keep it">
           <ul className="grid gap-1.5">
             {[
-              "Account + key: until you delete the account. Deletion removes the account, key and usage counters immediately.",
+              "Account, key and usage counters: until you delete the account. Deletion applies immediately.",
               "Sessions: expire after 7 days. Verification links: expire after 24 hours.",
-              "Contact messages: kept only as long as the conversation needs, then deleted on request.",
+              "Contact messages: kept while the conversation is open, deleted on request.",
             ].map((t) => (
               <li key={t} className="flex gap-2">
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-brand" />
@@ -152,19 +154,19 @@ export function Privacy() {
 
         <Section n="04" icon={ShieldCheck} title="Your rights (GDPR Arts. 15–21)">
           <p>
-            Access, rectify, erase, restrict, port, or object — write to{" "}
+            Access, rectification, erasure, restriction, portability, objection:
+            write to{" "}
             <a className="underline" href={`mailto:${CONTACT_EMAIL}`}>
               {CONTACT_EMAIL}
             </a>{" "}
-            from your account email and requests are answered within one month.
-            Self-serve deletion lives under API &amp; keys → Delete account
-            (password confirmation required). No account access? Email us and it
-            is removed anyway.
+            from your account email. Requests are answered within one month.
+            Self-serve deletion is under API &amp; keys → Delete account
+            (password confirmation required). If you cannot sign in, email from
+            your account address and the account is deleted.
           </p>
           <p className="text-[13px] text-ink-faint">
-            You also have the right to lodge a complaint with your national data
-            protection authority. No automated decision-making or profiling
-            takes place on this service.
+            You can also complain to your national data protection authority.
+            This service does no automated decision-making or profiling.
           </p>
         </Section>
       </div>
@@ -175,31 +177,31 @@ export function Privacy() {
 export function Terms() {
   return (
     <div className="grid gap-6">
-      <Hero lede="Short version: use the forecasts for research and operations, cite the run you used, keep your key secret, and don't resell the API as a competing forecast leaderboard."
+      <Hero lede="Use the forecasts for research and operations, cite the run you used, keep your key secret. The forecasts may not feed competing entries on public benchmarks."
       />
 
       <div className="grid gap-4">
         <Section n="01" icon={Database} title="The service">
           <p>
             DELU publishes day-ahead and 10-day point and probabilistic (P10 /
-            P50 / P90) forecasts for the German–Luxembourgian bidding zone —
+            P50 / P90) forecasts for the German–Luxembourgian bidding zone:
             load, solar, onshore and offshore wind, total generation, and the
-            day-ahead price — rebuilt twice daily (05:30 and 11:30
-            Europe/Berlin). Each verified account gets one API key with 5,000
-            calls a day (per-minute limits also apply). Calls made with your key
-            count as yours: keep it secret, rotate it from API &amp; keys if
+            day-ahead price. Runs rebuild twice daily at 05:30 and 11:30
+            Europe/Berlin. Each verified account gets one API key with 5,000
+            calls a day; per-minute limits also apply. Calls made with your key
+            count as yours. Rotate the key under API &amp; keys if it is
             exposed.
           </p>
         </Section>
 
         <Section n="02" icon={BadgeCheck} title="Citation and fair use">
           <p>
-            You may use the forecasts as a benchmark or baseline, including in
-            publications — please cite this work once the paper reference is
-            published, and always state which run (05:30 or 11:30) a result is
-            based on. The one restriction: the forecasts may not be used to
-            build competing forecasts of the same target quantities for
-            submission to public benchmarks or leaderboards.
+            The forecasts may be used as a benchmark or baseline, including in
+            publications. Cite this work once the paper reference is published,
+            and always state which run (05:30 or 11:30) a result is based on.
+            One restriction: the forecasts may not be used to build competing
+            forecasts of the same target quantities for public benchmarks or
+            leaderboards.
           </p>
         </Section>
 
@@ -215,12 +217,11 @@ export function Terms() {
 
         <Section n="04" icon={Scale} title="Acceptable use and termination">
           <p>
-            Don't scrape around rate limits, share keys across people, attack
-            the service, or break the law with it. Accounts that do are blocked;
-            you can delete yours at any time. Liability is limited to the
-            extent permitted by law — the service is free research
-            infrastructure. If these terms change materially, the update is
-            noted here with a new date; continued use means acceptance.
+            Circumventing rate limits, sharing keys, attacking the service, or
+            unlawful use leads to blocked accounts. You can delete your account
+            at any time. Liability is limited to the extent permitted by law.
+            Material changes to these terms are noted here with a new date;
+            continued use means acceptance.
           </p>
         </Section>
       </div>
@@ -228,29 +229,118 @@ export function Terms() {
   );
 }
 
+const EMAIL_RE = /.+@.+\..+/;
+
 const TOPICS = [
-  "Data correction",
-  "Data question",
-  "Benchmark citation",
-  "Privacy / deletion request",
-  "API problem",
-  "Something else",
-];
+  { value: "Data correction", hint: "Wrong values, gaps, delays", icon: AlertCircle },
+  { value: "Data question", hint: "Sources, methods, coverage", icon: Database },
+  { value: "Benchmark citation", hint: "Using DELU in a publication", icon: Quote },
+  { value: "Privacy / deletion request", hint: "Access, erasure, portability", icon: ShieldCheck },
+  { value: "API problem", hint: "Keys, limits, downloads", icon: KeyRound },
+  { value: "Something else", hint: "Anything not covered", icon: Mail },
+] as const;
+
+type Topic = (typeof TOPICS)[number]["value"];
+
+interface FieldErrors {
+  name?: string;
+  email?: string;
+  message?: string;
+}
+
+function nameError(v: string): string | undefined {
+  return v.trim().length >= 2 ? undefined : "Tell us your name.";
+}
+
+function emailError(v: string): string | undefined {
+  return EMAIL_RE.test(v.trim()) ? undefined : "Enter a valid email address.";
+}
+
+function messageError(v: string): string | undefined {
+  if (v.trim().length < 10) return "Write a message of 10+ characters.";
+  if (v.length > 4000) return "Keep it under 4000 characters.";
+  return undefined;
+}
+
+function FieldError({ id, message }: { id: string; message: string | undefined }) {
+  return message ? (
+    <p id={id} className="flex items-center gap-1.5 text-[13px] text-red-700">
+      <AlertCircle aria-hidden="true" className="size-3.5 shrink-0" />
+      {message}
+    </p>
+  ) : null;
+}
+
+function StatusMessage({ status, detail }: { status: "ok" | "error"; detail: string }) {
+  return status === "ok" ? (
+    <p
+      role="status"
+      className="flex items-center gap-2 rounded-md bg-brand-tint px-3 py-2 text-sm text-brand-deep"
+    >
+      <CheckCircle2 aria-hidden="true" className="size-4 shrink-0" />
+      {detail}
+    </p>
+  ) : (
+    <p
+      role="alert"
+      className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+    >
+      <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
+      {detail}
+    </p>
+  );
+}
 
 export function Contact() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [topic, setTopic] = useState(TOPICS[0]);
+  const [topic, setTopic] = useState<Topic>(TOPICS[0].value);
   const [message, setMessage] = useState("");
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [state, setState] = useState<
     { status: "idle" } | { status: "busy" } | { status: "ok"; detail: string } | { status: "error"; detail: string }
   >({ status: "idle" });
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+
+  function onNameChange(v: string) {
+    setName(v);
+    if (errors.name) setErrors((e) => ({ ...e, name: nameError(v) }));
+  }
+
+  function onEmailChange(v: string) {
+    setEmail(v);
+    if (errors.email) setErrors((e) => ({ ...e, email: emailError(v) }));
+  }
+
+  function onMessageChange(v: string) {
+    setMessage(v);
+    if (errors.message) setErrors((e) => ({ ...e, message: messageError(v) }));
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    const next: FieldErrors = {
+      name: nameError(name),
+      email: emailError(email),
+      message: messageError(message),
+    };
+    setErrors(next);
+    const refs = { name: nameRef, email: emailRef, message: messageRef } as const;
+    const first = (["name", "email", "message"] as const).find((k) => next[k]);
+    if (first) {
+      refs[first].current?.focus();
+      return;
+    }
     setState({ status: "busy" });
     try {
-      const res = await sendContact({ name, email, topic, message });
+      const res = await sendContact({
+        name: name.trim(),
+        email: email.trim(),
+        topic,
+        message: message.trim(),
+      });
       setState({ status: "ok", detail: res.detail });
       setMessage("");
     } catch (err) {
@@ -261,125 +351,169 @@ export function Contact() {
     }
   }
 
-  const valid =
-    name.trim().length >= 2 && /.+@.+\..+/.test(email) && message.trim().length >= 10;
-
   return (
     <div className="grid gap-6">
-      <Hero lede="Corrections, data questions, benchmark citations, privacy requests — anything about DELU lands in one inbox and is read by the person who runs the pipeline. Expect a reply within 2 working days."
+      <Hero lede="One inbox for corrections, data questions, citations, and privacy requests. Replies within 2 working days."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="grid gap-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Send className="size-4 text-brand" />
+              <Send aria-hidden="true" className="size-4 text-brand" />
               Send a message
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={submit} className="grid gap-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ct-name">Name</Label>
-                  <Input
-                    id="ct-name"
-                    autoComplete="name"
-                    placeholder="Ada Lovelace"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ct-email">Email</Label>
-                  <Input
-                    id="ct-email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
+            <form onSubmit={submit} noValidate className="grid gap-5">
+              <div className="grid gap-1.5">
+                <Label htmlFor="ct-name">Name</Label>
+                <Input
+                  id="ct-name"
+                  name="name"
+                  autoComplete="name"
+                  placeholder="Ada Lovelace…"
+                  value={name}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  onBlur={() => {
+                    if (name !== "") setErrors((e) => ({ ...e, name: nameError(name) }));
+                  }}
+                  aria-invalid={errors.name ? true : undefined}
+                  aria-describedby={errors.name ? "ct-name-error" : undefined}
+                  ref={nameRef}
+                  className="h-11 text-base sm:text-sm"
+                />
+                <FieldError id="ct-name-error" message={errors.name} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="ct-email">Email</Label>
+                <Input
+                  id="ct-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  spellCheck={false}
+                  placeholder="you@example.com…"
+                  value={email}
+                  onChange={(e) => onEmailChange(e.target.value)}
+                  onBlur={() => {
+                    if (email !== "") setErrors((e) => ({ ...e, email: emailError(email) }));
+                  }}
+                  aria-invalid={errors.email ? true : undefined}
+                  aria-describedby={errors.email ? "ct-email-error" : undefined}
+                  ref={emailRef}
+                  className="h-11 text-base sm:text-sm"
+                />
+                <FieldError id="ct-email-error" message={errors.email} />
+              </div>
+              <div className="grid gap-1.5">
+                <span id="ct-topic-label" className="text-sm font-medium text-ink">
+                  Topic
+                </span>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="ct-topic-label"
+                  className="grid gap-2 sm:grid-cols-2"
+                >
+                  {TOPICS.map((t) => {
+                    const selected = t.value === topic;
+                    return (
+                      <label
+                        key={t.value}
+                        className={cn(
+                          "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors touch-manipulation focus-within:ring-2 focus-within:ring-brand focus-within:ring-offset-1",
+                          selected
+                            ? "border-brand bg-brand-tint/50"
+                            : "border-line bg-card hover:border-ink-faint",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="topic"
+                          value={t.value}
+                          checked={selected}
+                          onChange={() => setTopic(t.value)}
+                          className="sr-only"
+                        />
+                        <t.icon
+                          aria-hidden="true"
+                          className={cn(
+                            "mt-0.5 size-4 shrink-0",
+                            selected ? "text-brand-deep" : "text-ink-faint",
+                          )}
+                        />
+                        <span className="grid gap-0.5">
+                          <span className="text-sm font-medium text-ink">{t.value}</span>
+                          <span className="text-xs text-ink-faint">{t.hint}</span>
+                        </span>
+                        {selected ? (
+                          <CheckCircle2
+                            aria-hidden="true"
+                            className="ml-auto size-4 shrink-0 text-brand"
+                          />
+                        ) : null}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="ct-topic">Topic</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {TOPICS.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTopic(t)}
-                      className={
-                        t === topic
-                          ? "rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-white"
-                          : "rounded-full border border-line bg-card px-3 py-1.5 text-xs text-ink-soft hover:bg-paper"
-                      }
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ct-message">
-                  Message{" "}
-                  <span className="font-normal text-ink-faint">
-                    — include the forecast date + run (05:30 / 11:30) for data questions
-                  </span>
-                </Label>
+                <Label htmlFor="ct-message">Message</Label>
                 <textarea
                   id="ct-message"
-                  rows={6}
+                  name="message"
+                  rows={5}
                   maxLength={4000}
-                  placeholder="What did you see, and what did you expect?"
+                  placeholder="What did you see, and what did you expect?…"
                   value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  className="w-full rounded-md border border-line bg-card px-3 py-2 text-sm placeholder:text-ink-faint focus:border-brand"
+                  onChange={(e) => onMessageChange(e.target.value)}
+                  onBlur={() => {
+                    if (message !== "")
+                      setErrors((e) => ({ ...e, message: messageError(message) }));
+                  }}
+                  aria-invalid={errors.message ? true : undefined}
+                  aria-describedby={errors.message ? "ct-message-error" : undefined}
+                  ref={messageRef}
+                  className="min-h-28 w-full rounded-md border border-line bg-card px-3 py-2.5 text-base placeholder:text-ink-faint focus:border-brand sm:text-sm"
                 />
-                <p className="text-right text-xs text-ink-faint tnum">
-                  {message.length}/4000
+                <div className="flex items-start justify-between gap-2">
+                  <FieldError id="ct-message-error" message={errors.message} />
+                  <p className="ml-auto text-xs text-ink-faint tnum">
+                    {message.length}/4000
+                  </p>
+                </div>
+              </div>
+              {state.status === "ok" || state.status === "error" ? (
+                <StatusMessage status={state.status} detail={state.detail} />
+              ) : null}
+              <div className="grid gap-3">
+                <div>
+                  <Button
+                    type="submit"
+                    disabled={state.status === "busy"}
+                    className="h-11 w-full touch-manipulation px-6 sm:w-auto"
+                  >
+                    {state.status === "busy" ? (
+                      <Loader2 aria-hidden="true" className="animate-spin" />
+                    ) : (
+                      <Send aria-hidden="true" />
+                    )}
+                    {state.status === "busy" ? "Sending…" : "Send message"}
+                  </Button>
+                </div>
+                <p className="text-xs leading-relaxed text-ink-faint">
+                  Used only to reply (GDPR Art. 6(1)(f)), sent via Resend.
                 </p>
               </div>
-              {state.status === "ok" ? (
-                <p className="flex items-center gap-2 rounded-md bg-brand-tint px-3 py-2 text-sm text-brand-deep">
-                  <CheckCircle2 className="size-4" />
-                  {state.detail}
-                </p>
-              ) : null}
-              {state.status === "error" ? (
-                <p className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                  <AlertCircle className="size-4" />
-                  {state.detail}
-                </p>
-              ) : null}
-              <div>
-                <Button type="submit" disabled={state.status === "busy" || !valid}>
-                  {state.status === "busy" ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Send />
-                  )}
-                  {state.status === "busy" ? "Sending…" : "Send message"}
-                </Button>
-              </div>
-              <p className="text-xs leading-relaxed text-ink-faint">
-                Your name, email and message are used only to reply (GDPR Art.
-                6(1)(f)) and sent via Resend. Prefer email?{" "}
-                <a className="underline" href={`mailto:${CONTACT_EMAIL}`}>
-                  {CONTACT_EMAIL}
-                </a>
-                .
-              </p>
             </form>
           </CardContent>
         </Card>
 
-        <div className="grid content-start gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Card>
             <CardContent className="grid gap-2 pt-6 text-sm">
               <p className="flex items-center gap-2 font-medium text-ink">
-                <Mail className="size-4 text-brand" />
+                <Mail aria-hidden="true" className="size-4 text-brand" />
                 Direct inbox
               </p>
               <a
@@ -391,7 +525,7 @@ export function Contact() {
               <Button asChild variant="outline" size="sm" className="mt-1">
                 <a href={`mailto:${CONTACT_EMAIL}`}>
                   Write an email
-                  <ArrowUpRight />
+                  <ArrowUpRight aria-hidden="true" />
                 </a>
               </Button>
             </CardContent>
@@ -400,9 +534,9 @@ export function Contact() {
             <CardContent className="grid gap-2 pt-6 text-sm text-ink-soft">
               <p className="font-medium text-ink">Deletion requests</p>
               <p>
-                Signed in? Delete everything instantly under API &amp; keys →
-                Delete account. Locked out? Email from your account address and
-                it is removed.
+                Signed in? Delete everything under API &amp; keys → Delete
+                account. Locked out? Email from your account address and it is
+                removed.
               </p>
             </CardContent>
           </Card>
@@ -415,13 +549,14 @@ export function Contact() {
 export function Attribution() {
   return (
     <div className="grid gap-6">
-      <Hero lede="DELU forecasts stand on open public data. Everything measured below belongs to its publishers — only the P10 / P50 / P90 bands are ours. Please credit sources the same way when you reuse them."
+      <Hero lede="Measured data below belongs to its publishers and is reused under their licences. Only the P10 / P50 / P90 bands are DELU model output."
       />
 
       <div className="grid gap-4">
         <Section n="01" icon={Database} title="ENTSO-E Transparency Platform">
           <p>
-            Day-ahead prices and realised load come from the ENTSO-E
+            Realised load, the day-ahead load forecast, SDAC and EXAA auction
+            prices, and realised and forecast generation come from the ENTSO-E
             Transparency Platform (
             <a
               className="underline"
@@ -431,7 +566,7 @@ export function Attribution() {
             >
               transparency.entsoe.eu
             </a>
-            ), republished here under their{" "}
+            ), republished under their{" "}
             <a
               className="underline"
               href="https://transparencyplatform.zendesk.com/hc/en-us/articles/40921911218961-Legal-Terms-and-Conditions"
@@ -440,11 +575,11 @@ export function Attribution() {
             >
               terms of use
             </a>
-            : cite ENTSO-E as the source, reuse in good faith, and check their
-            open-data list before each reuse — some series need the primary
-            owner's prior agreement. Load actuals arrive with a delay of
-            several hours, which is why the white actuals line on the chart
-            ends before the forecast begins.
+            . Cite ENTSO-E as the source and check their open-data list before
+            each reuse: some series need the primary data owner's prior
+            agreement. Load actuals arrive with a delay of several hours, which
+            is why the actuals line on the chart ends before the forecast
+            begins.
           </p>
         </Section>
 
@@ -460,7 +595,7 @@ export function Attribution() {
             >
               smard.de
             </a>
-            ), freely available under §111d EnWG and licensed{" "}
+            ), published under §111d EnWG and licensed{" "}
             <a
               className="underline"
               href="https://creativecommons.org/licenses/by/4.0/"
@@ -472,21 +607,71 @@ export function Attribution() {
             . Required credit:{" "}
             <span className="rounded bg-paper px-1.5 py-0.5 font-mono text-[13px] text-ink">
               Bundesnetzagentur | SMARD.de
-            </span>{" "}
-            — share and adapt freely with attribution, a licence link, and a
-            note of any changes. The Bundesnetzagentur gives no warranty on
+            </span>
+            , with a licence link and a note of any changes. No warranty on
             correctness or completeness.
           </p>
         </Section>
 
-        <Section n="03" icon={BadgeCheck} title="What is ours">
+        <Section n="03" icon={Database} title="Energy-Charts · Fraunhofer ISE">
+          <p>
+            Day-ahead auction prices for the DE-LU bidding zone come from the
+            Energy-Charts API (
+            <a
+              className="underline"
+              href="https://www.energy-charts.info"
+              target="_blank"
+              rel="noreferrer"
+            >
+              energy-charts.info
+            </a>
+            ), operated by Fraunhofer ISE and largely licensed{" "}
+            <a
+              className="underline"
+              href="https://creativecommons.org/licenses/by/4.0/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC BY 4.0
+            </a>
+            . Credit: Fraunhofer ISE, energy-charts.info.
+          </p>
+        </Section>
+
+        <Section n="04" icon={Database} title="Open-Meteo · ECMWF IFS">
+          <p>
+            Weather inputs (2 m temperature, 100 m wind speed and direction,
+            shortwave radiation, cloud cover over the DE-LU zone and the North
+            and Baltic Seas) come from the Open-Meteo API (
+            <a
+              className="underline"
+              href="https://open-meteo.com"
+              target="_blank"
+              rel="noreferrer"
+            >
+              open-meteo.com
+            </a>
+            ), ECMWF IFS 00:00 UTC runs, licensed{" "}
+            <a
+              className="underline"
+              href="https://open-meteo.com/en/licence"
+              target="_blank"
+              rel="noreferrer"
+            >
+              CC BY 4.0
+            </a>
+            . These are model inputs, not displayed values. Free-tier use is
+            non-commercial.
+          </p>
+        </Section>
+
+        <Section n="05" icon={BadgeCheck} title="What is ours">
           <p>
             The P10 / P50 / P90 forecast bands are produced by the DELU pipeline
             (gradient-boosted model, two runs a day) and are original model
-            output — the citation rules on the{" "}
-            <span className="text-ink">Terms</span> page apply to them: state
-            which run (05:30 or 11:30) a result is based on, and don't submit
-            competing forecasts of the same targets to public leaderboards.
+            output. The citation rules on the{" "}
+            <span className="text-ink">Terms</span> page apply: state which run
+            (05:30 or 11:30) a result is based on.
           </p>
         </Section>
       </div>
