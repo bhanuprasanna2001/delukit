@@ -89,6 +89,13 @@ export function refreshKey() {
   );
 }
 
+export function deleteAccount(password: string) {
+  return request<{ ok: boolean }>("/auth/account", {
+    method: "DELETE",
+    body: JSON.stringify({ password }),
+  });
+}
+
 export interface ForecastParams {
   date: string;
   gate: string;

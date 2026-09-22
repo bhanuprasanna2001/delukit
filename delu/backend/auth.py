@@ -121,6 +121,30 @@ def logout(token: str) -> None:
         cx.execute("DELETE FROM sessions WHERE token_hash = ?", (_sha(token),))
 
 
+def delete_account(user_id: int, password: str) -> None:
+    """Verify the password, then remove the user and everything tied to it.
+
+    Cascades (sessions, email_tokens, api_keys) are handled by SQLite
+    ON DELETE CASCADE; usage_min/usage_day have no FK so are removed
+    explicitly first, otherwise orphaned counters would linger.
+    """
+    with db.connect() as cx:
+        row = cx.execute(
+            "SELECT pw_hash, salt FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError("Account not found.")
+        if hash_password(password, row["salt"]) != row["pw_hash"]:
+            raise ValueError("Password is wrong.")
+        key = cx.execute(
+            "SELECT id FROM api_keys WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if key is not None:
+            cx.execute("DELETE FROM usage_min WHERE key_id = ?", (key["id"],))
+            cx.execute("DELETE FROM usage_day WHERE key_id = ?", (key["id"],))
+        cx.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
 def session_user(token: str | None):
     if not token:
         return None

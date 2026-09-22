@@ -36,9 +36,11 @@ export function Privacy() {
       <section className="grid gap-2">
         <H>Deletion</H>
         <p>
-          Write to <a className="text-brand underline" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
-          from your account email and the account, key and usage counters are
-          removed.
+          Delete the account yourself under API & keys → Delete account (password
+          confirmation required). That removes the account, key and usage
+          counters immediately. If you cannot sign in, write to{" "}
+          <a className="text-brand underline" href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>{" "}
+          from your account email and it is removed.
         </p>
       </section>
     </Prose>

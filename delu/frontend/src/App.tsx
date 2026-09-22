@@ -94,6 +94,11 @@ export default function App() {
     setView("forecasts");
   }
 
+  function accountDeleted() {
+    setMe(null);
+    setView("forecasts");
+  }
+
   function center(content: React.ReactNode) {
     return <div className="flex justify-center pt-10">{content}</div>;
   }
@@ -256,7 +261,11 @@ export default function App() {
               {me === undefined ? (
                 <div className="h-40 animate-pulse rounded-lg bg-line" />
               ) : me ? (
-                <Dashboard me={me} onChanged={refreshMe} />
+                <Dashboard
+                  me={me}
+                  onChanged={refreshMe}
+                  onDeleted={accountDeleted}
+                />
               ) : (
                 <div className="grid gap-3">
                   <p className="text-sm text-ink-soft">Sign in to manage the API key.</p>

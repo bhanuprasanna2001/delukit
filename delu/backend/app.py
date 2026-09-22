@@ -98,6 +98,10 @@ class Login(BaseModel):
     password: str
 
 
+class DeleteAccount(BaseModel):
+    password: str
+
+
 def current_user(delu_session: str | None = Cookie(default=None)) -> dict:
     user = auth.session_user(delu_session)
     if user is None:
@@ -342,6 +346,28 @@ def me(user: dict = Depends(current_user)) -> dict:
         "verified": user["verified"],
         "key": keys.describe(user["id"]) if user["verified"] else None,
     }
+
+
+@app.delete("/auth/account")
+def delete_account(
+    body: DeleteAccount,
+    response: Response,
+    user: dict = Depends(current_user),
+) -> dict:
+    """Permanently remove the account, key, sessions and usage counters."""
+    gate = f"delete:{user['id']}"
+    try:
+        auth.check_throttle(gate)
+    except ValueError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+    try:
+        auth.delete_account(user["id"], body.password)
+    except ValueError as exc:
+        auth.note_fail(gate)
+        raise HTTPException(status_code=401, detail=str(exc))
+    auth.note_ok(gate)
+    response.delete_cookie(auth.SESSION_COOKIE)
+    return {"ok": True}
 
 
 @app.post("/v1/keys/refresh")
