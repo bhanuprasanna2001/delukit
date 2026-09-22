@@ -323,24 +323,32 @@ export default function App() {
               "mx-auto flex h-full max-w-[1800px] flex-wrap items-center gap-x-5 gap-y-1 px-4 text-xs text-ink-faint sm:px-6",
             )}
           >
-            <span>© {new Date().getFullYear()} DELU</span>
-            {(
-              [
-                ["attribution", "Data attribution"],
-                ["privacy", "Privacy"],
-                ["terms", "Terms"],
-                ["contact", "Contact"],
-              ] as const
-            ).map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setView(v)}
-                className="cursor-pointer hover:text-ink-soft"
-              >
-                {label}
-              </button>
-            ))}
+            <span className="flex items-center gap-1.5 font-medium text-ink-soft">
+              <img src="/delu.svg" alt="DELU logo" className="size-5 rounded" />
+              DELU
+              <span className="font-normal text-ink-faint">
+                © {new Date().getFullYear()}
+              </span>
+            </span>
+            <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-1">
+              {(
+                [
+                  ["attribution", "Data attribution"],
+                  ["privacy", "Privacy"],
+                  ["terms", "Terms"],
+                  ["contact", "Contact"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setView(v)}
+                  className="cursor-pointer hover:text-ink-soft"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </footer>
       </div>
