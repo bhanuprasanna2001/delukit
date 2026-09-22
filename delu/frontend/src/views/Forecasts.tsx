@@ -1,10 +1,11 @@
-import { Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ForecastChart } from "../components/ForecastChart";
 import { Card, CardContent } from "../components/ui/card";
 import { Select } from "../components/ui/select";
 import { Tooltip } from "../components/ui/tooltip";
 import {
+  formatRunDay,
   getOptions,
   publicForecast,
   targetLabel,
@@ -103,23 +104,56 @@ export function Forecasts() {
 
   const gates = opts.runs?.[eff?.date ?? ""]?.[eff?.span ?? "d1"] ?? opts.gates;
 
+  const dayIdx = eff ? opts.dates.indexOf(eff.date) : -1;
+  const prevDay = dayIdx > 0 ? opts.dates[dayIdx - 1] : null;
+  const nextDay = dayIdx >= 0 && dayIdx < opts.dates.length - 1 ? opts.dates[dayIdx + 1] : null;
+
+  const stepBtn =
+    "flex h-9 w-8 flex-none cursor-pointer items-center justify-center rounded-md border border-line bg-card text-ink-soft transition-colors hover:border-ink-faint hover:text-ink disabled:cursor-default disabled:opacity-35 disabled:hover:border-line disabled:hover:text-ink-soft";
+
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col px-4 sm:px-6 lg:min-h-0">
       <div className="flex-none pt-4">
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
-          <label className="grid gap-1 text-sm font-medium">
-            Run day
-            <Select
-              value={eff?.date ?? ""}
-              onChange={(e) => setSel((s) => ({ ...s, date: e.target.value }))}
-            >
-              {opts.dates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <div className="grid gap-1">
+            <span id="runday-label" className="text-sm font-medium">
+              Run day
+            </span>
+            <div className="flex items-center gap-1" role="group" aria-labelledby="runday-label">
+              <button
+                type="button"
+                aria-label={prevDay ? `Previous run day, ${formatRunDay(prevDay)}` : "No earlier run day"}
+                title={prevDay ? `Previous day (${formatRunDay(prevDay)})` : "No earlier day"}
+                disabled={!prevDay}
+                onClick={() => prevDay && setSel((s) => ({ ...s, date: prevDay }))}
+                className={stepBtn}
+              >
+                <ChevronLeft aria-hidden="true" />
+              </button>
+              <Select
+                value={eff?.date ?? ""}
+                aria-label="Run day"
+                onChange={(e) => setSel((s) => ({ ...s, date: e.target.value }))}
+                className="w-[136px] text-center tnum"
+              >
+                {opts.dates.map((d) => (
+                  <option key={d} value={d}>
+                    {formatRunDay(d)}
+                  </option>
+                ))}
+              </Select>
+              <button
+                type="button"
+                aria-label={nextDay ? `Next run day, ${formatRunDay(nextDay)}` : "No later run day"}
+                title={nextDay ? `Next day (${formatRunDay(nextDay)})` : "No later day"}
+                disabled={!nextDay}
+                onClick={() => nextDay && setSel((s) => ({ ...s, date: nextDay }))}
+                className={stepBtn}
+              >
+                <ChevronRight aria-hidden="true" />
+              </button>
+            </div>
+          </div>
 
           <div className="grid gap-1">
             <span className="flex items-center gap-1 text-sm font-medium">
@@ -129,9 +163,10 @@ export function Forecasts() {
                 trigger={
                   <button
                     type="button"
+                    aria-label="About the two daily runs"
                     className="cursor-pointer text-ink-faint hover:text-brand"
                   >
-                    <Info className="size-4" />
+                    <Info className="size-4" aria-hidden="true" />
                   </button>
                 }
                 content={GATE_INFO}
@@ -245,6 +280,7 @@ export function Forecasts() {
               actual={data.actual}
               unit={unitFor(data.meta.target)}
               builtAt={data.meta.generated_at}
+              target={eff?.target ?? data.meta.target}
             />
           </div>
         )}

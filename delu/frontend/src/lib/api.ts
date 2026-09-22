@@ -145,6 +145,34 @@ export function unitFor(target: string): string {
   return "MW";
 }
 
+// One accent per energy quantity. Hues follow the subject: sea blue for
+// offshore wind, coastal teal for onshore, sun amber for solar, money rose
+// for day-ahead prices. All tuned to sit on the night plot at equal weight.
+export const SERIES_ACCENTS: Record<string, string> = {
+  load_actual_mw: "#4ade80",
+  gen_actual_total_mwh: "#c084fc",
+  gen_actual_wind_offshore_mwh: "#38bdf8",
+  gen_actual_wind_onshore_mwh: "#2dd4bf",
+  gen_actual_photovoltaics_mwh: "#fbbf24",
+  price_sdac_seq1_eur_mwh: "#fb7185",
+};
+
+export function accentFor(target: string): string {
+  return SERIES_ACCENTS[target] ?? "#4ade80";
+}
+
+const runDayFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Berlin",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+
+export function formatRunDay(isoDate: string): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  return Number.isNaN(+d) ? isoDate : runDayFmt.format(d);
+}
+
 const berlinTime = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Berlin",
   hour: "2-digit",
