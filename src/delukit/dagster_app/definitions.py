@@ -26,7 +26,7 @@ run and fires the failure sensor instead of publishing silently.
 Schedules (Europe/Berlin; daemon included in `dagster dev`):
   gate_schedule    05:30 + 11:30 daily -> forecast_d1 + forecast_d10
   scores_schedule  15:30 daily   -> forecast_scores for completed gates
-  retrain_schedule Sunday 02:00  -> weekly registry retrain (all products)
+  retrain_schedule Sunday 04:00  -> forced weekly retrain (all products)
   tune_schedule    1st of month  -> monthly Optuna tuning (all products)
 
 Alerting (no services needed): ops_failure_alert fires on any failed run,
@@ -234,14 +234,31 @@ def retrain_products(context: dg.OpExecutionContext) -> dict:
     from delukit.core.config.products import SPANS, TARGETS
     from delukit.forecast import GATE_WALL, fit_product
 
-    fitted = 0
+    fitted, skipped, failed = 0, 0, []
     for target in TARGETS:
         for gate in sorted(GATE_WALL):
             for span in SPANS:
-                if fit_product(target, gate, span, registry=True) is not None:
+                name = f"{target} {gate} {span}"
+                try:
+                    # Forced: reuse would otherwise skip every recent model
+                    # and the "weekly retrain" would retrain nothing.
+                    workflow = fit_product(
+                        target, gate, span, registry=True, force_retrain=True
+                    )
+                except Exception as exc:  # noqa: BLE001 - one bad product must not stop the other 23
+                    failed.append(f"{name}: {type(exc).__name__}: {exc}")
+                    context.log.warning("retrain failed for %s: %s", name, exc)
+                    continue
+                if workflow is None:
+                    skipped += 1
+                else:
                     fitted += 1
-    context.log.info("retrained %d products", fitted)
-    return {"fitted": fitted}
+    context.log.info("retrained %d products (%d skipped)", fitted, skipped)
+    if failed:
+        # Fail the run so the failure sensor alerts; already-fitted models
+        # stay saved, so a retry only re-attempts the missing ones.
+        raise RuntimeError(f"retrain failed for {len(failed)} products: {failed}")
+    return {"fitted": fitted, "skipped": skipped}
 
 
 @dg.op(description="Monthly Optuna tuning for every product (defaults: 10 trials).")
@@ -303,10 +320,10 @@ def scores_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest
 
 
 @dg.schedule(
-    cron_schedule="0 2 * * 0", execution_timezone="Europe/Berlin", target=retrain_job
+    cron_schedule="0 4 * * 0", execution_timezone="Europe/Berlin", target=retrain_job
 )
 def retrain_schedule() -> list[dg.RunRequest]:
-    """Sunday 02:00: retrain everything; the registry keeps the champion."""
+    """Sunday 04:00: force-retrain everything; the registry keeps the champion."""
     return [dg.RunRequest()]
 
 

@@ -80,11 +80,13 @@ def workflow_config(
     model: str = PRIMARY_MODEL,
     registry: bool = False,
     use_tuned: bool = True,
+    model_reuse_enable: bool = True,
 ) -> ForecastingWorkflowConfig:
     """Preset config for one (target x gate x span) product."""
     config = ForecastingWorkflowConfig(
         model_id=model_id(target, gate, span),
         model=model,  # ty: ignore[invalid-argument-type]
+        model_reuse_enable=model_reuse_enable,
         quantiles=QUANTILES,
         horizons=HORIZONS[(gate, span)],
         target_column=target,
@@ -163,18 +165,20 @@ def create_workflow(
     registry: bool = False,
     config: ForecastingWorkflowConfig | None = None,
     use_tuned: bool = True,
+    force_retrain: bool = False,
 ) -> CustomForecastingWorkflow:
     """Assemble one product workflow; XGBoost gets real thread count."""
     # Only the primary forecaster is calibrated: fallback outputs are
     # constant by design, and calibrating them adds failure modes for nothing.
     calibrate = model == PRIMARY_MODEL
-    return create_workflow_from_config(
-        config
-        or workflow_config(
-            target, gate, span, model=model, registry=registry, use_tuned=use_tuned
-        ),
-        calibrate=calibrate,
+    config = config or workflow_config(
+        target, gate, span, model=model, registry=registry, use_tuned=use_tuned
     )
+    if force_retrain:
+        # Scheduled retraining must actually fit: ignore the 7-day reuse rule.
+        # Gate runs keep the default (reuse recent models, predict fast).
+        config.model_reuse_enable = False
+    return create_workflow_from_config(config, calibrate=calibrate)
 
 
 def fit_product(
@@ -185,14 +189,21 @@ def fit_product(
     model: str = PRIMARY_MODEL,
     train_days: int | None = None,
     registry: bool = False,
+    force_retrain: bool = False,
 ) -> CustomForecastingWorkflow | None:
-    """Fit on all history as known now. None when the registry skips."""
+    """Fit on all history as known now. None when the registry skips.
+
+    force_retrain disables model reuse so the fit really runs (weekly
+    retrain); gate runs leave it off to reuse recent models.
+    """
     now = datetime.now(UTC)
     ds = load()
     if train_days is not None:
         ds = ds.filter_by_range(now - timedelta(days=train_days), now)
     data = ds.filter_by_available_before(now).select_version()
-    workflow = create_workflow(target, gate, span, model=model, registry=registry)
+    workflow = create_workflow(
+        target, gate, span, model=model, registry=registry, force_retrain=force_retrain
+    )
     workflow.fit(data)
     return workflow if workflow.model.is_fitted else None
 
