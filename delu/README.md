@@ -6,7 +6,7 @@
 
 **One FastAPI process serves the chart, the export, and the keyed API.**
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi)](backend/app.py)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat-square&logo=fastapi)](backend/app.py)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)](frontend/)
 [![SQLite](https://img.shields.io/badge/users_+_keys-sqlite-003B57?style=flat-square&logo=sqlite)](backend/db.py)
 
