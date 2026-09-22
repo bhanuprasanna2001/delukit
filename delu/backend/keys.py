@@ -48,7 +48,10 @@ def issue(user_id: int) -> tuple[str, str]:
                 "UPDATE usage_min SET key_id = ? WHERE key_id = ? AND minute = ?",
                 (cur.lastrowid, old_id, minute),
             )
-            cx.execute("DELETE FROM usage_min WHERE key_id = ?", (old_id,))
+            if cur.lastrowid != old_id:
+                # Drop the old key's other minutes; skip when SQLite reused
+                # the id (then the rows above already belong to the new key).
+                cx.execute("DELETE FROM usage_min WHERE key_id = ?", (old_id,))
     return _prefix_of(raw), raw
 
 

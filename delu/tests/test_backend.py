@@ -85,13 +85,16 @@ def test_keys_minute_quota_and_refresh_carries_day(tmp_dirs):
         assert keys.check_and_hit(kid)[0]
     ok, retry = keys.check_and_hit(kid)
     assert not ok and retry > 0
-    _, _raw2 = keys.issue(uid)  # refresh kills the old key, carries the day quota
+    _, _raw2 = keys.issue(uid)  # refresh kills the old key, carries the quotas
     assert keys.lookup(raw) is None
     desc = keys.describe(uid)
     assert (
         desc["used_today"] >= keys.MIN_LIMIT and desc["daily_limit"] == keys.DAY_LIMIT
     )
-    # PARKED for atomic commits: minute-carry assertion lands with the fix.
+    # Minute quota carries too: a refresh must never mint fresh allowance.
+    # (SQLite reuses the key id here, which used to wipe the carried row.)
+    ok2, retry2 = keys.check_and_hit(keys.lookup(_raw2)["id"])
+    assert not ok2 and retry2 > 0
 
 
 # --- forecasts ---
