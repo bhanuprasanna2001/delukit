@@ -294,7 +294,10 @@ def scores_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest
         context.scheduled_execution_time.astimezone(BERLIN) - timedelta(days=1)
     ).date()
     return [
-        dg.RunRequest(partition_key=f"{day.isoformat()}|{gate}")
+        dg.RunRequest(
+            partition_key=f"{day.isoformat()}|{gate}",
+            run_key=f"scores-{day.isoformat()}-{gate}",
+        )
         for gate in ("0530", "1130")
     ]
 
