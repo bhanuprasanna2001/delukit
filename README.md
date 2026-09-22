@@ -2,6 +2,18 @@
 
 Day-ahead and 10-day power forecasts for the DE-LU zone. Load, solar, wind on/offshore, total generation, day-ahead price. Rebuilt at 05:30 and 11:30 Berlin time, served as chart, API and export.
 
+## Website
+
+![DELU forecast chart with P10/P50/P90 bands and actuals](public/delu.png)
+
+The app at `:8000` — forecast chart, self-serve export, API-key dashboard.
+
+## Dagster pipeline
+
+![Dagster asset graph from raw sync to forecasts](public/dagster.svg)
+
+Six assets, four schedules. The 05:30/11:30 gates run the full chain; scoring and retraining follow.
+
 ## Run with Docker
 
 ```bash
@@ -116,7 +128,7 @@ ENTSO-E Transparency · SMARD · Open-Meteo ECMWF IFS · OpenHolidays. Forecasts
 
 ## Contributing
 
-Small PRs with a test. `uv run pytest -q` at root and in `delu/`, `npm run lint` in the frontend. New providers follow the existing `sync` / `fetch_day` / `to_clean` shape.
+Small PRs with a test. `uv run pre-commit install` once, then `uv run pytest -q` at root and in `delu/`, `npm run lint` in the frontend. Merging needs `all-checks-passed` green. New providers follow the existing `sync` / `fetch_day` / `to_clean` shape.
 
 ---
 
