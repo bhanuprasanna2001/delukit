@@ -32,6 +32,9 @@ services:
       DELU_ACTUALS: /data/clean
       DELU_DB: /app/data/app.db
       DELU_PUBLIC_URL: ${DELU_PUBLIC_URL:-http://localhost:8000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-DELU <onboarding@resend.dev>}
+      CONTACT_TO: ${CONTACT_TO:-bhanu.prasanna2001@gmail.com}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

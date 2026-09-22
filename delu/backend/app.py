@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import auth, db, forecasts, keys
-from backend.mail import send_verify
+from backend.mail import send_contact, send_verify
 
 PUBLIC_URL = os.getenv("DELU_PUBLIC_URL", "http://localhost:8000")
 COOKIE_SECURE = os.getenv("DELU_COOKIE_SECURE", "0") == "1"
@@ -100,6 +100,18 @@ class Login(BaseModel):
 
 class DeleteAccount(BaseModel):
     password: str
+
+
+class ContactIn(BaseModel):
+    name: str
+    email: str
+    topic: str
+    message: str
+
+
+# Contact form: 5 sends per IP per hour. ponytail: in-memory like the
+# public rate limiter above; move to Redis if workers > 1.
+_contact_hits: dict[str, deque[float]] = defaultdict(deque)
 
 
 def current_user(delu_session: str | None = Cookie(default=None)) -> dict:
@@ -261,6 +273,39 @@ def api_export(
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+@app.post("/api/contact")
+def contact(body: ContactIn, request: Request) -> dict:
+    """Forward a contact-form message to the operator inbox via Resend/SMTP."""
+    from backend import auth as _auth
+
+    name = body.name.strip()[:80]
+    email = body.email.strip().lower()[:254]
+    topic = body.topic.strip()[:60]
+    message = body.message.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Tell us your name.")
+    if not _auth.EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    if len(message) < 10:
+        raise HTTPException(status_code=400, detail="Write a message of 10+ characters.")
+    if len(message) > 4000:
+        raise HTTPException(status_code=400, detail="Keep it under 4000 characters.")
+    if not topic:
+        topic = "General"
+    ip = request.client.host if request.client else "?"
+    now = time.monotonic()
+    hits = _contact_hits[f"contact:{ip}"]
+    while hits and hits[0] <= now - 3600:
+        hits.popleft()
+    if len(hits) >= 5:
+        raise HTTPException(
+            status_code=429, detail="Too many messages. Try again in an hour."
+        )
+    hits.append(now)
+    send_contact(name, email, topic, message)
+    return {"ok": True, "detail": "Message sent. Expect a reply within 2 working days."}
 
 
 @app.post("/auth/signup")

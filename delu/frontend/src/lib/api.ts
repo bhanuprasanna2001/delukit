@@ -76,6 +76,18 @@ export function resend() {
   return request<{ detail: string }>("/auth/resend", { method: "POST" });
 }
 
+export function sendContact(data: {
+  name: string;
+  email: string;
+  topic: string;
+  message: string;
+}) {
+  return request<{ detail: string }>("/api/contact", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export function verifyEmail(token: string) {
   return request<{ detail: string; api_key?: string; prefix?: string }>(
     `/auth/verify?token=${encodeURIComponent(token)}`,
