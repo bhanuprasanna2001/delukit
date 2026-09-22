@@ -1,4 +1,6 @@
 import os
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -39,6 +41,50 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+# Per-IP fixed windows for the anonymous /api/* surface (/v1 has per-key
+# quotas in keys.py). ponytail: in-memory, exact for the single uvicorn
+# worker; move to Redis if workers > 1.
+_IP_LIMITS = {"/api/export": (10, 60), "/api/default": (60, 60)}
+_ip_hits: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+@app.middleware("http")
+async def public_rate_limit(request: Request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    limit, window = _IP_LIMITS.get(request.url.path, _IP_LIMITS["/api/default"])
+    now = time.monotonic()
+    key = f"{_client_ip(request)}:{request.url.path}"
+    hits = _ip_hits[key]
+    while hits and hits[0] <= now - window:
+        hits.popleft()
+    if len(_ip_hits) > 10000:
+        _ip_hits.clear()
+    if len(hits) >= limit:
+        retry = int(hits[0] + window - now) + 1
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit reached. Slow down."},
+            headers={
+                "Retry-After": str(retry),
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+            },
+        )
+    hits.append(now)
+    response = await call_next(request)
+    response.headers["X-RateLimit-Limit"] = str(limit)
+    response.headers["X-RateLimit-Remaining"] = str(limit - len(hits))
     return response
 
 
