@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Keeps hook revs and action pins moving; review the PRs, never blind-merge.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
