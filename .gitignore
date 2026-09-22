@@ -12,6 +12,9 @@ wheels/
 # secrets
 .env
 
+# runtime state: app database with credential material, never commit
+delu/data/
+
 # macos
 .DS_Store
 
