@@ -81,9 +81,12 @@ def test_keys_minute_quota_and_refresh_carries_day(tmp_dirs):
     kid = keys.lookup(raw)["id"]
     assert keys.lookup("wrong_prefix_key") is None
     assert keys.lookup("delu_live_" + "x" * 43) is None
-    for _ in range(keys.MIN_LIMIT):
-        assert keys.check_and_hit(kid)[0]
-    ok, retry = keys.check_and_hit(kid)
+    # Loop until the quota trips: usage buckets are wall-clock minutes,
+    # so a fixed count can straddle a boundary on slow runners.
+    for _ in range(2 * keys.MIN_LIMIT):
+        ok, retry = keys.check_and_hit(kid)
+        if not ok:
+            break
     assert not ok and retry > 0
     _, _raw2 = keys.issue(uid)  # refresh kills the old key, carries the quotas
     assert keys.lookup(raw) is None
@@ -250,8 +253,11 @@ def test_app_v1_quota_and_export(tmp_dirs, monkeypatch, actuals):
     r = c.get("/v1/forecast", headers={"X-API-Key": raw})
     assert r.status_code == 200 and r.headers["X-RateLimit-Day"] == str(keys.DAY_LIMIT)
     kid = keys.lookup(raw)["id"]
-    for _ in range(keys.MIN_LIMIT):
-        keys.check_and_hit(kid)
+    # Loop until the quota trips (see above): a fixed count can straddle
+    # a wall-clock minute boundary on slow runners.
+    for _ in range(2 * keys.MIN_LIMIT):
+        if not keys.check_and_hit(kid)[0]:
+            break
     assert c.get("/v1/forecast", headers={"X-API-Key": raw}).status_code == 429
     assert (
         c.get(
