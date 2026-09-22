@@ -329,10 +329,19 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
             fh.write(json.dumps(record) + "\n")
         webhook = os.getenv("DELUKIT_ALERT_WEBHOOK")
         if webhook:
+            slack_payload = {
+                "text": (
+                    f"*delukit run failed*\n"
+                    f"• Job: `{record['job']}`\n"
+                    f"• Run: `{record['run_id']}`\n"
+                    f"• Time: {record['time']}\n"
+                    f"• Error: {record['error']}"
+                )
+            }
             urllib.request.urlopen(
                 urllib.request.Request(
                     webhook,
-                    data=json.dumps(record).encode(),
+                    data=json.dumps(slack_payload).encode(),
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 ),
