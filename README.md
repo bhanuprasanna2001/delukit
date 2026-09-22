@@ -1,29 +1,133 @@
-# delukit
+<div align="center">
 
-Day-ahead and 10-day power forecasts for the DE-LU zone. Load, solar, wind on/offshore, total generation, day-ahead price. Rebuilt at 05:30 and 11:30 Berlin time, served as chart, API and export.
+<img src="public/delu.svg" alt="delu logo" width="120" />
 
-## Website
+# ⚡ delukit
 
-![DELU forecast chart with P10/P50/P90 bands and actuals](public/delu.png)
+**Day-ahead & 10-day power forecasts for the DE-LU zone — load, solar, wind, generation, price.**
 
-The app at `:8000` — forecast chart, self-serve export, API-key dashboard.
+Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 
-## Dagster pipeline
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square&logo=python)](pyproject.toml)
+[![Dagster](https://img.shields.io/badge/orchestrated_with-dagster-1C3D5A?style=flat-square)](src/delukit/dagster_app/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat-square&logo=fastapi)](delu/backend/)
+[![React](https://img.shields.io/badge/UI-React_19-61DAFB?style=flat-square&logo=react)](delu/frontend/)
+[![Docker](https://img.shields.io/badge/run-docker_compose-2496ED?style=flat-square&logo=docker)](compose.yaml)
 
-![Dagster asset graph from raw sync to forecasts](public/dagster.svg)
+[🚀 Quickstart](#-quickstart-60-seconds) ·
+[📊 What you get](#-what-you-get) ·
+[🔄 How it flows](#-how-it-flows) ·
+[⌨️ CLI](#️-cli) ·
+[🔌 API](delu/README.md)
 
-Six assets, four schedules. The 05:30/11:30 gates run the full chain; scoring and retraining follow.
+</div>
 
-## Run with Docker
+---
+
+<p align="center">
+  <img src="public/delu.png" alt="DE-LU forecast chart with P10/P50/P90 bands and actuals" width="100%" />
+  <br />
+  <sub>The app at <code>:8000</code> — P10/P50/P90 bands, actuals overlay, run-day stepper.</sub>
+</p>
+
+## ✨ Why delukit
+
+- 🔮 **24 XGBoost models** — 6 targets × 2 gates × 2 spans, point *and* probabilistic
+- 🕰️ **Point-in-time correct** — every row knows when it became known, so gates never train on the future
+- ⚡ **Two fresh forecasts a day** — full chain runs at 05:30 / 11:30 Berlin time
+- 📈 **1-day + 10-day horizons** — day-ahead precision meets 10-day planning
+- 📦 **One command to run** — `docker compose up --build` gives you app + pipeline
+- 🔑 **API with keys & quotas** — anonymous exploration, keyed `/v1` for real use
+
+> Forecasts are model output, **not trading advice**.
+
+## 📊 What you get
+
+| Surface | Where | What |
+|---|---|---|
+| 📈 Forecast chart | `http://localhost:8000` | P10/P50/P90 bands, actuals, 05:30/11:30 toggle, D+1 / 10-day switch |
+| 📥 Self-serve export | `/api/export` | CSV / Parquet / XLSX by range, horizon, timezone — verified login only |
+| 🔑 API + dashboard | `/v1/forecast` | Keyed endpoint (60/min, 5000/day), usage bar, in-app Swagger |
+| 🛠️ Pipeline UI | `http://localhost:3000` | Dagster asset graph, schedules, checks, retries |
+
+<p align="center">
+  <img src="public/dagster.svg" alt="Dagster asset graph from raw sync to forecasts" width="100%" />
+  <br />
+  <sub>Six assets, four schedules — the 05:30/11:30 gates run the full chain; scoring and retraining follow.</sub>
+</p>
+
+## 🚀 Quickstart — 60 seconds
 
 ```bash
 cp .env.example .env  # add ENTSOE_API_KEY
 docker compose up --build
 ```
 
-App on http://localhost:8000, pipeline UI on http://localhost:3000.
+App → http://localhost:8000 · Pipeline → http://localhost:3000
 
-## Develop without Docker
+That's it. The only required key is `ENTSOE_API_KEY`.
+
+## 🔄 How it flows
+
+```mermaid
+flowchart LR
+    E[ENTSO-E] --> R[raw]
+    S[SMARD] --> R
+    W[Open-Meteo] --> R
+    H[Holidays] --> R
+    R --> C[clean]
+    C --> V[versioned\navailable_at]
+    V --> G{05:30 / 11:30}
+    G --> F[forecasts]
+```
+
+Raw provider payloads → quarter-hour clean tables → point-in-time versioned parts → **24 XGBoost models** → parquet + plots in `data/forecasts`. Serving lives in [`delu/`](delu/README.md) — one FastAPI process serves UI *and* API.
+
+## ⌨️ CLI
+
+| Command | Does |
+|---|---|
+| `delukit` | Sync ENTSO-E, SMARD, weather, calendar into `data/raw` |
+| `delukit-clean` | Raw → `data/clean/*.parquet` |
+| `delukit-dataset` | Clean → `data/versioned` + gate-replay validation (`--validate-only` to just check) |
+| `delukit-forecast` | Fit + predict one gate, e.g. `--gate 1130 --span d1 [--date 2026-09-21]` |
+| `delukit-backtest` | Replay a product over history, score per lead day |
+| `delukit-tune` | Optuna-tune one product into `data/tuning` |
+
+## 🔌 API taste
+
+```bash
+# anonymous, rate-limited per IP
+curl 'localhost:8000/api/forecast?span=d1&target=load_actual_mw&type=probabilistic'
+
+# keyed — 60/min, 5000/day
+curl -H 'X-API-Key: delu_live_...' \
+  'localhost:8000/v1/forecast?span=d10&target=gen_actual_photovoltaics_mwh&type=probabilistic'
+
+# export — verified login, cookies included
+curl -b cookies.txt \
+  'localhost:8000/api/export?start=2026-09-01&end=2026-09-15&target=load_actual_mw&gate=1130&kind=point&tz=Europe/Berlin&horizon_days=1&format=csv' -o export.csv
+```
+
+Full reference in [`delu/README`](delu/README.md).
+
+## 🗂️ Project structure
+
+```
+src/delukit/
+  main.py clean.py dataset.py forecast.py backtest.py tune.py
+  core/         # grain, config, availability, products
+  sources/      # entsoe, smard, weather, calendar
+  dagster_app/  # assets, schedules, checks, run.py
+delu/
+  backend/      # FastAPI app
+  frontend/     # React app
+tests/ delu/tests/
+compose.yaml Dockerfile delu/Dockerfile
+data/           # gitignored: raw, clean, versioned, forecasts, scores, mlflow
+```
+
+## 🛠️ Develop without Docker
 
 Python ≥3.12 with `uv`, Node 22.
 
@@ -45,75 +149,20 @@ mkdir -p data/.dagster && export DAGSTER_HOME=$PWD/data/.dagster
 uv run dagster dev -m delukit.dagster_app.definitions -p 3000
 ```
 
-## How it flows
+## ⏰ Operations
 
-```mermaid
-flowchart LR
-    E[ENTSO-E] --> R[raw]
-    S[SMARD] --> R
-    W[Open-Meteo] --> R
-    H[Holidays] --> R
-    R --> C[clean]
-    C --> V[versioned\navailable_at]
-    V --> G{05:30 / 11:30}
-    G --> F[forecasts]
-```
-
-Raw provider payloads → quarter-hour clean tables → point-in-time versioned parts → 24 XGBoost models (6 targets × 2 gates × 2 spans) → parquet + plots in `data/forecasts`. Every row knows when it became known, so gates never train on the future. Serving lives in `delu/` — diagram there.
-
-## CLI
-
-| Command | Does |
+| Schedule | Runs |
 |---|---|
-| `delukit` | Sync ENTSO-E, SMARD, weather, calendar into `data/raw` |
-| `delukit-clean` | Raw → `data/clean/*.parquet` |
-| `delukit-dataset` | Clean → `data/versioned` + gate-replay validation (`--validate-only` to just check) |
-| `delukit-forecast` | Fit + predict one gate, e.g. `--gate 1130 --span d1 [--date 2026-09-21]` |
-| `delukit-backtest` | Replay a product over history, score per lead day |
-| `delukit-tune` | Optuna-tune one product into `data/tuning` |
+| 🌅 05:30 + 11:30 daily | Full chain: sync → clean → versioned → both spans |
+| 🧮 15:30 daily | Score yesterday's gates against arrived actuals |
+| 🏆 Sunday 02:00 | Retrain all products, registry keeps the champion |
+| 🎛️ 1st of month 03:00 | Re-tune all products |
 
-## API
+The versioned-data check **blocks forecasts on bad data**. Writes are idempotent, partitions retry twice, failures append to `data/ops/alerts.log` and POST `DELUKIT_ALERT_WEBHOOK` when set.
 
-```bash
-curl 'localhost:8000/api/forecast?span=d1&target=load_actual_mw&type=probabilistic'
+## ⚙️ Configuration
 
-curl -H 'X-API-Key: delu_live_...' \
-  'localhost:8000/v1/forecast?span=d10&target=gen_actual_photovoltaics_mwh&type=probabilistic'
-
-curl -b cookies.txt \
-  'localhost:8000/api/export?start=2026-09-01&end=2026-09-15&target=load_actual_mw&gate=1130&kind=point&tz=Europe/Berlin&horizon_days=1&format=csv' -o export.csv
-```
-
-Anonymous `/api/*` is rate-limited per IP. `/v1/*` needs a key: 60/min, 5000/day. Full reference in [delu/README](delu/README.md).
-
-## Project structure
-
-```
-src/delukit/
-  main.py clean.py dataset.py forecast.py backtest.py tune.py
-  core/         # grain, config, availability, products
-  sources/      # entsoe, smard, weather, calendar
-  dagster_app/  # assets, schedules, checks, run.py
-delu/
-  backend/      # FastAPI app
-  frontend/     # React app
-tests/ delu/tests/
-compose.yaml Dockerfile delu/Dockerfile
-data/           # gitignored: raw, clean, versioned, forecasts, scores, mlflow
-```
-
-## Operations
-
-- 05:30 + 11:30 daily — full chain: sync → clean → versioned → both spans
-- 15:30 daily — score yesterday's gates against arrived actuals
-- Sunday 02:00 — retrain all products, registry keeps the champion
-- 1st of month 03:00 — re-tune all products
-
-Versioned-data check blocks forecasts on bad data. Forecast writes are idempotent, partitions retry twice, failures append to `data/ops/alerts.log` and POST `DELUKIT_ALERT_WEBHOOK` when set.
-
-## Configuration
-
-`.env.example` → `.env`. The only required key is `ENTSOE_API_KEY`.
+`.env.example` → `.env`. Only `ENTSOE_API_KEY` is required.
 
 | Variable | Purpose |
 |---|---|
@@ -122,14 +171,16 @@ Versioned-data check blocks forecasts on bad data. Forecast writes are idempoten
 | `DELUKIT_ALERT_WEBHOOK` | Slack alert on failed runs |
 | `DELU_COOKIE_SECURE` | Set `1` over https |
 
-## Data attribution
+## 🙏 Data attribution
 
-ENTSO-E Transparency · SMARD · Open-Meteo ECMWF IFS · OpenHolidays. Forecasts are model output, not trading advice.
+ENTSO-E Transparency · SMARD · Open-Meteo ECMWF IFS · OpenHolidays.
 
-## Contributing
+## 🤝 Contributing
 
 Small PRs with a test. `uv run pre-commit install` once, then `uv run pytest -q` at root and in `delu/`, `npm run lint` in the frontend. Merging needs `all-checks-passed` green. New providers follow the existing `sync` / `fetch_day` / `to_clean` shape.
 
 ---
 
-Built by [Bhanu Prasanna](mailto:bhanu.prasanna2001@gmail.com) — forecasts that respect what was known when.
+<div align="center">
+  <sub>Built by <a href="mailto:bhanu.prasanna2001@gmail.com">Bhanu Prasanna</a> — forecasts that respect what was known when.</sub>
+</div>
