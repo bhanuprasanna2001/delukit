@@ -40,7 +40,7 @@ Run:
 
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -239,10 +239,13 @@ def retrain_products(context: dg.OpExecutionContext) -> dict:
             for span in SPANS:
                 name = f"{target} {gate} {span}"
                 try:
-                    # Forced: reuse would otherwise skip every recent model
-                    # and the "weekly retrain" would retrain nothing.
                     workflow = fit_product(
-                        target, gate, span, registry=True, force_retrain=True
+                        target,
+                        gate,
+                        span,
+                        forecast_origin=datetime.now(UTC),
+                        registry=True,
+                        force_retrain=True,
                     )
                 except Exception as exc:  # noqa: BLE001 - one bad product must not stop the other 23
                     failed.append(f"{name}: {type(exc).__name__}: {exc}")

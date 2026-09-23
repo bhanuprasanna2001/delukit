@@ -186,21 +186,18 @@ def fit_product(
     gate: str,
     span: str,
     *,
+    forecast_origin: datetime,
     model: str = PRIMARY_MODEL,
     train_days: int | None = None,
     registry: bool = False,
     force_retrain: bool = False,
 ) -> CustomForecastingWorkflow | None:
-    """Fit on all history as known now. None when the registry skips.
-
-    force_retrain disables model reuse so the fit really runs (weekly
-    retrain); gate runs leave it off to reuse recent models.
-    """
-    now = datetime.now(UTC)
     ds = load()
     if train_days is not None:
-        ds = ds.filter_by_range(now - timedelta(days=train_days), now)
-    data = ds.filter_by_available_before(now).select_version()
+        ds = ds.filter_by_range(
+            forecast_origin - timedelta(days=train_days), forecast_origin
+        )
+    data = ds.filter_by_available_before(forecast_origin).select_version()
     workflow = create_workflow(
         target, gate, span, model=model, registry=registry, force_retrain=force_retrain
     )
@@ -222,17 +219,22 @@ def slice_span(forecast: ForecastDataset, day: date, span: str) -> ForecastDatas
 
 
 def predict_product(
-    workflow: CustomForecastingWorkflow, target: str, gate: str, span: str, day: date
+    workflow: CustomForecastingWorkflow,
+    span: str,
+    *,
+    forecast_origin: datetime,
 ) -> ForecastDataset:
-    """Forecast the span from the gate using only data known at the gate."""
-    gate_dt = gate_datetime(day, gate)
     data = (
         load()
-        .filter_by_range(gate_dt - PREDICT_CONTEXT, gate_dt + PREDICT_LENGTH[span])
-        .filter_by_available_before(gate_dt)
+        .filter_by_range(
+            forecast_origin - PREDICT_CONTEXT,
+            forecast_origin + PREDICT_LENGTH[span],
+        )
+        .filter_by_available_before(forecast_origin)
         .select_version()
     )
-    return slice_span(workflow.predict(data, forecast_start=gate_dt), day, span)
+    day = forecast_origin.astimezone(BERLIN).date()
+    return slice_span(workflow.predict(data, forecast_start=forecast_origin), day, span)
 
 
 def predict_with_fallback(
@@ -250,6 +252,7 @@ def predict_with_fallback(
     output filename: downstream must treat non-primary models (especially
     flatliner) as degraded output, not business as usual.
     """
+    forecast_origin = gate_datetime(day, gate)
     tried = []
     for model in models:
         try:
@@ -257,12 +260,16 @@ def predict_with_fallback(
                 target,
                 gate,
                 span,
+                forecast_origin=forecast_origin,
                 model=model,
                 registry=registry and model == PRIMARY_MODEL,
             )
-            if workflow is None:  # registry skipped the re-fit; load the stored model
+            if workflow is None:
                 workflow = create_workflow(target, gate, span, registry=True)
-            return predict_product(workflow, target, gate, span, day), model
+            return (
+                predict_product(workflow, span, forecast_origin=forecast_origin),
+                model,
+            )
         except (
             FlatlinerDetectedError,
             InsufficientlyCompleteError,

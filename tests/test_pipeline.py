@@ -4,7 +4,7 @@ Why these: wrong gate/horizon leaks future lags; fallback returning nothing
 is an outage; multi-day bands without bucketing silently re-score d1 skill.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -110,6 +110,121 @@ def test_predict_with_fallback_uses_first_success(monkeypatch):
     monkeypatch.setattr(F, "predict_product", lambda *a, **k: sentinel)
     out, model = F.predict_with_fallback("t", "0530", "d1", date(2026, 1, 5))
     assert out is sentinel and model == "xgboost"
+
+
+def test_fitting_and_prediction_share_forecast_origin(monkeypatch):
+    import pandas as pd
+    from openstef_core.datasets import (
+        ForecastDataset,
+        TimeSeriesDataset,
+        VersionedTimeSeriesDataset,
+    )
+
+    import delukit.forecast as F
+    from delukit.core.clean import UTC, quarter_grid
+    from delukit.dataset import QUARTER
+
+    day = date(2026, 1, 5)
+    origin = F.gate_datetime(day, "0530")
+    index = pd.date_range("2026-01-05 00:00", periods=3, freq="h", tz=UTC)
+    available_at = pd.to_datetime(
+        ["2026-01-05 03:00Z", "2026-01-05 04:30Z", "2026-01-05 05:00Z"]
+    )
+    part = TimeSeriesDataset(
+        pd.DataFrame(
+            {"feature": [1.0, 2.0, 3.0], "available_at": available_at},
+            index=index,
+        ),
+        sample_interval=QUARTER,
+    )
+    dataset = VersionedTimeSeriesDataset([part])
+    captured = {}
+
+    class Model:
+        is_fitted = True
+
+    class Workflow:
+        model = Model()
+
+        def fit(self, data):
+            captured["fit"] = data.data["feature"].dropna().tolist()
+
+        def predict(self, data, forecast_start):
+            captured["predict"] = data.data["feature"].dropna().tolist()
+            captured["forecast_start"] = forecast_start
+            grid = quarter_grid(day + timedelta(days=1))
+            return ForecastDataset(
+                pd.DataFrame({"quantile_P50": [1.0] * len(grid)}, index=grid),
+                sample_interval=QUARTER,
+                forecast_start=forecast_start,
+                target_column="target",
+            )
+
+    monkeypatch.setattr(F, "load", lambda: dataset)
+    monkeypatch.setattr(F, "create_workflow", lambda *args, **kwargs: Workflow())
+
+    forecast, model = F.predict_with_fallback(
+        "target", "0530", "d1", day, models=("xgboost",)
+    )
+
+    assert captured == {
+        "fit": [1.0, 2.0],
+        "predict": [1.0, 2.0],
+        "forecast_start": origin,
+    }
+    assert model == "xgboost"
+    assert forecast.forecast_start == origin
+
+
+def test_fit_product_anchors_training_window_to_forecast_origin(monkeypatch):
+    import pandas as pd
+    from openstef_core.datasets import TimeSeriesDataset, VersionedTimeSeriesDataset
+
+    import delukit.forecast as F
+    from delukit.dataset import QUARTER
+
+    origin = F.gate_datetime(date(2026, 1, 5), "0530")
+    index = pd.DatetimeIndex(
+        [
+            origin - timedelta(hours=36),
+            origin - timedelta(hours=24),
+            origin - timedelta(hours=12),
+            origin,
+        ]
+    )
+    part = TimeSeriesDataset(
+        pd.DataFrame(
+            {
+                "feature": [1.0, 2.0, 3.0, 4.0],
+                "available_at": [origin - timedelta(days=2)] * 4,
+            },
+            index=index,
+        ),
+        sample_interval=QUARTER,
+    )
+    captured = {}
+
+    class Model:
+        is_fitted = True
+
+    class Workflow:
+        model = Model()
+
+        def fit(self, data):
+            captured["fit"] = data.data["feature"].dropna().tolist()
+
+    monkeypatch.setattr(F, "load", lambda: VersionedTimeSeriesDataset([part]))
+    monkeypatch.setattr(F, "create_workflow", lambda *args, **kwargs: Workflow())
+
+    F.fit_product(
+        "target",
+        "0530",
+        "d1",
+        forecast_origin=origin,
+        train_days=1,
+    )
+
+    assert captured["fit"] == [2.0, 3.0]
 
 
 def test_backtest_split_target_and_bands():
