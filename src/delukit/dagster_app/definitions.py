@@ -11,26 +11,25 @@ Assets (upstream -> downstream):
   versioned_data  clean -> data/versioned/*.parquet (point-in-time parts)
   forecast_d1     one gate run, day-ahead span (run_gate, fallback inside)
   forecast_d10    one gate run, 10-day span (same)
-  forecast_scores daily errors of stored forecasts vs arrived actuals
+  forecast_scores complete delivery-day errors of stored forecasts
 
-Partitions are (date x gate): one partition is exactly one gate run, so a
-backfill over a date range replays history gate by gate. Dagster caps
-multi-partitions at two dimensions, hence separate d1/d10 assets sharing
-one partitions definition. Everything written is idempotent (tmp+replace,
-date-scoped paths, deduplicated scores), so retries and backfills are safe.
+Forecast partitions are (date x gate). Score partitions are completed Berlin
+delivery days, independent of forecast partitions. Score files are written by
+delivery day, so retries and parallel backfills do not append rows.
 
 Checks: versioned_data_valid (blocking) replays the availability contract;
 a forecast partition that fails its sanity check raises, which fails the
 run and fires the failure sensor instead of publishing silently.
 
 Schedules (Europe/Berlin; daemon included in `dagster dev`):
+  source_refresh_schedule 05:00 + 11:00 + 15:00 -> raw/clean/versioned
   gate_schedule    05:30 + 11:30 daily -> forecast_d1 + forecast_d10
-  scores_schedule  15:30 daily   -> forecast_scores for completed gates
+  scores_schedule  15:30 daily   -> yesterday's completed delivery day
   retrain_schedule Sunday 04:00  -> forced weekly retrain (all products)
   tune_schedule    1st of month  -> monthly Optuna tuning (all products)
 
-Alerting (no services needed): ops_failure_alert fires on any failed run,
-appends JSON to data/ops/alerts.log and POSTs DELUKIT_ALERT_WEBHOOK when set.
+Alerting: ops_failure_alert records failed runs and POSTs the configured
+webhook. Completed evaluation runs POST a digest to the same webhook.
 
 Run:
   mkdir -p data/.dagster && export DAGSTER_HOME=$PWD/data/.dagster
@@ -38,16 +37,20 @@ Run:
   python -m delukit.dagster_app.run forecast --date 2026-09-21 --gate 0530
 """
 
+import hashlib
 import json
 import os
-from datetime import date, datetime, timedelta
+import urllib.request
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import dagster as dg
 import pandas as pd
+from dotenv import load_dotenv
 
 BERLIN = ZoneInfo("Europe/Berlin")
+load_dotenv()
 
 # Static date keys, not time-window partitions: time windows exclude the
 # incomplete current day, but gates run intraday for today. Extend the end
@@ -59,14 +62,82 @@ gate_partitions = dg.MultiPartitionsDefinition(
         "gate": dg.StaticPartitionsDefinition(["0530", "1130"]),
     }
 )
+score_partitions = dg.DailyPartitionsDefinition(
+    start_date="2025-10-01", timezone="Europe/Berlin"
+)
 
 ALERTS_LOG = Path("data/ops/alerts.log")
+SCORE_NOTIFICATIONS_LOG = Path("data/ops/score_notifications.jsonl")
 
 
 def _partition_day_gate(partition_key: str) -> tuple[date, str]:
     """Split a 'date|gate' partition key (definition order, verified)."""
     day, _, gate = partition_key.partition("|")
     return date.fromisoformat(day), gate
+
+
+REQUIRED_VERSIONED_PARTS = {
+    "entsoe_actuals",
+    "exaa",
+    "sdac",
+    "entsoe_day_ahead",
+    "tso_day_ahead",
+    "smard_actuals",
+    "smard_day_ahead",
+    "calendar",
+    "weather",
+}
+
+
+def _require_prepared_snapshot(day: date, refresh_hour: int, cutoff: time) -> None:
+    """Require a complete dataset build committed in the scheduled window."""
+    from delukit.core.config import VERSIONED_DIR
+
+    manifest = VERSIONED_DIR / "_READY.json"
+    if not manifest.exists():
+        raise RuntimeError("versioned snapshot has no validated commit marker")
+    state = json.loads(manifest.read_text())
+    start = datetime.combine(day, time(refresh_hour), BERLIN)
+    end = datetime.combine(day, cutoff, BERLIN)
+    committed = datetime.fromisoformat(state["committed_at"]).astimezone(BERLIN)
+    if not start <= committed <= end:
+        raise RuntimeError("versioned snapshot not committed in pre-run refresh window")
+    paths = {path.stem: path for path in VERSIONED_DIR.glob("*.parquet")}
+    if not REQUIRED_VERSIONED_PARTS.issubset(paths):
+        missing = sorted(REQUIRED_VERSIONED_PARTS - paths.keys())
+        raise RuntimeError(f"versioned snapshot incomplete: missing {missing}")
+    changed = [
+        name
+        for name in sorted(REQUIRED_VERSIONED_PARTS)
+        if state["parts"].get(name) != _file_identity(paths[name])
+    ]
+    if changed:
+        raise RuntimeError(f"versioned snapshot changed after validation: {changed}")
+
+
+def _file_identity(path: Path) -> dict[str, int]:
+    stat = path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _commit_snapshot(when: datetime | None = None) -> None:
+    """Publish a readiness marker only after every part validates."""
+    from delukit.core.config import VERSIONED_DIR
+
+    paths = {path.stem: path for path in VERSIONED_DIR.glob("*.parquet")}
+    if not REQUIRED_VERSIONED_PARTS.issubset(paths):
+        raise RuntimeError("cannot commit incomplete versioned snapshot")
+    state = {
+        "committed_at": (when or datetime.now(BERLIN)).isoformat(),
+        "parts": {
+            name: _file_identity(paths[name])
+            for name in sorted(REQUIRED_VERSIONED_PARTS)
+        },
+    }
+    path = VERSIONED_DIR / "_READY.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, sort_keys=True) + "\n")
+    tmp.replace(path)
 
 
 @dg.asset(description="Sync providers into data/raw (incremental by design).")
@@ -103,9 +174,12 @@ def clean_data(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     description="Clean tables -> versioned point-in-time parts.",
 )
 def versioned_data(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
-    from delukit.dataset import build, load
+    from delukit.dataset import build, load, validate
 
     build()
+    if validate() != 0:
+        raise RuntimeError("versioned dataset failed availability validation")
+    _commit_snapshot()
     parts = load()
     return dg.MaterializeResult(
         metadata={
@@ -180,6 +254,8 @@ def _forecast_partition(
     from delukit.forecast import run_gate
 
     day, gate = _partition_day_gate(context.partition_key)
+    wall = time(5, 30) if gate == "0530" else time(11, 30)
+    _require_prepared_snapshot(day, wall.hour, wall)
     run_gate(day, gate, span, TARGETS, registry=True)
     passed, meta = _check_forecast_files(day, gate, span)
     if not passed:
@@ -212,21 +288,109 @@ def forecast_d10(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
 
 @dg.asset(
-    partitions_def=gate_partitions,
-    deps=[forecast_d1, forecast_d10],
+    partitions_def=score_partitions,
+    deps=[versioned_data],
     retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
     backfill_policy=dg.BackfillPolicy.multi_run(),
-    description="Daily errors of stored forecasts vs arrived actuals.",
+    description="Complete delivery-day scores using truth known by 15:30 the next day.",
 )
 def forecast_scores(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
-    from delukit.backtest import score_gate
+    from delukit.backtest import score_delivery_day
+    from delukit.core.config.products import SCORES_DIR
 
-    day, gate = _partition_day_gate(context.partition_key)
-    rows = score_gate(day, gate)
-    mean_rmae = sum(r["rmae"] for r in rows) / len(rows) if rows else float("nan")
+    day = date.fromisoformat(context.partition_key)
+    cutoff = datetime.combine(day + timedelta(days=1), time(15, 30), BERLIN)
+    if datetime.now(BERLIN) < cutoff:
+        raise RuntimeError(f"delivery day {day} is not ready for its 15:30 evaluation")
+    _require_prepared_snapshot(day + timedelta(days=1), 15, time(15, 30))
+    rows = score_delivery_day(day, cutoff)
+    path = SCORES_DIR / "delivery" / f"{day.isoformat()}.parquet"
+    send_score_digest(day, rows, path)
+    complete = [r for r in rows if r["status"] == "complete"]
+    mean_rmae = sum(r["rmae"] for r in complete) / len(complete) if complete else None
     return dg.MaterializeResult(
-        metadata={"products_scored": len(rows), "mean_rmae": mean_rmae}
+        metadata={
+            "delivery_day": day.isoformat(),
+            "complete": len(complete),
+            "incomplete": len(rows) - len(complete),
+            "mean_rmae": mean_rmae,
+            "scores_path": str(path),
+        }
     )
+
+
+def score_digest(day: date, rows: list[dict], path: Path) -> str:
+    """One operational Slack message for both gates and all lead days."""
+    complete = [row for row in rows if row["status"] == "complete"]
+    lines = [
+        f"*delukit evaluation {day.isoformat()}*",
+        f"Complete {len(complete)}/{len(rows)}; incomplete {len(rows) - len(complete)}",
+    ]
+    if rows:
+        lines.append(f"Truth cutoff: {rows[0]['as_of']}")
+    lines.append("*Day ahead by gate and target*")
+    for row in rows:
+        if row["span"] != "d1":
+            continue
+        label = f"{row['gate']} {row['target']}"
+        if row["status"] == "complete":
+            interval_coverage = 100 * (row["obs_p90"] - row["obs_p10"])
+            lines.append(
+                f"{label}: rMAE {row['rmae']:.3f}, rCRPS {row['rcrps']:.3f}, "
+                f"P10-P90 coverage {interval_coverage:.1f}%"
+            )
+        else:
+            lines.append(f"{label}: incomplete ({row['reason']})")
+    lines.append("*10-day lead summary*")
+    for lead in range(1, 11):
+        group = [r for r in rows if r["span"] == "d10" and r["lead_day"] == lead]
+        scored = [r for r in group if r["status"] == "complete"]
+        if scored:
+            mean_rmae = sum(r["rmae"] for r in scored) / len(scored)
+            mean_rcrps = sum(r["rcrps"] for r in scored) / len(scored)
+            mean_coverage = (
+                100 * sum(r["obs_p90"] - r["obs_p10"] for r in scored) / len(scored)
+            )
+            lines.append(
+                f"D+{lead}: {len(scored)}/{len(group)} complete, "
+                f"rMAE {mean_rmae:.3f}, rCRPS {mean_rcrps:.3f}, "
+                f"P10-P90 coverage {mean_coverage:.1f}%"
+            )
+        else:
+            lines.append(f"D+{lead}: 0/{len(group)} complete")
+    fallback = sum(r["model"] not in (None, "xgboost") for r in rows)
+    lines.append(f"Fallback forecasts: {fallback}")
+    lines.append(f"Full scores: `{path}`")
+    return "\n".join(lines)
+
+
+def send_score_digest(day: date, rows: list[dict], path: Path) -> bool:
+    """POST changed digests; a crash after POST may send one duplicate."""
+    text = score_digest(day, rows, path)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    key = f"{day.isoformat()}:{digest}"
+    if SCORE_NOTIFICATIONS_LOG.exists():
+        with SCORE_NOTIFICATIONS_LOG.open() as log:
+            if any(json.loads(line).get("key") == key for line in log if line.strip()):
+                return False
+    webhook = os.getenv("DELUKIT_ALERT_WEBHOOK")
+    if not webhook:
+        return False
+    request = urllib.request.Request(
+        webhook,
+        data=json.dumps({"text": text}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            pass
+    except (OSError, ValueError):
+        raise RuntimeError("evaluation webhook delivery failed") from None
+    SCORE_NOTIFICATIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with SCORE_NOTIFICATIONS_LOG.open("a") as log:
+        log.write(json.dumps({"key": key, "day": day.isoformat()}) + "\n")
+    return True
 
 
 @dg.op(description="Retrain every product into the registry (promotion is automatic).")
@@ -286,11 +450,21 @@ def tune_job() -> None:
 
 
 @dg.schedule(
+    cron_schedule=["0 5 * * *", "0 11 * * *", "0 15 * * *"],
+    execution_timezone="Europe/Berlin",
+    target=dg.AssetSelection.assets(raw_data, clean_data, versioned_data),
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
+def source_refresh_schedule() -> list[dg.RunRequest]:
+    """Refresh published inputs before gate and evaluation runs."""
+    return [dg.RunRequest()]
+
+
+@dg.schedule(
     cron_schedule=["30 5 * * *", "30 11 * * *"],
     execution_timezone="Europe/Berlin",
-    # upstream() pulls raw -> clean -> versioned into the same run:
-    # target=[forecasts] alone runs forecast-only on stale versioned data.
-    target=dg.AssetSelection.assets(forecast_d1, forecast_d10).upstream(),
+    target=dg.AssetSelection.assets(forecast_d1, forecast_d10),
+    default_status=dg.DefaultScheduleStatus.RUNNING,
 )
 def gate_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest]:
     """Fire both spans for the gate whose wall-clock hour just ticked."""
@@ -303,24 +477,25 @@ def gate_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest]:
 @dg.schedule(
     cron_schedule="30 15 * * *",
     execution_timezone="Europe/Berlin",
-    target=[forecast_scores],
+    target=dg.AssetSelection.assets(forecast_scores),
+    default_status=dg.DefaultScheduleStatus.RUNNING,
 )
 def scores_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest]:
-    """Score yesterday's completed gates (actuals have arrived by 15:30)."""
+    """Refresh truth and evaluate yesterday's completed Berlin delivery day."""
     day = (
         context.scheduled_execution_time.astimezone(BERLIN) - timedelta(days=1)
     ).date()
     return [
         dg.RunRequest(
-            partition_key=f"{day.isoformat()}|{gate}",
-            run_key=f"scores-{day.isoformat()}-{gate}",
+            partition_key=day.isoformat(), run_key=f"scores-{day.isoformat()}"
         )
-        for gate in ("0530", "1130")
     ]
 
 
 @dg.schedule(
-    cron_schedule="0 4 * * 0", execution_timezone="Europe/Berlin", target=retrain_job
+    cron_schedule="0 4 * * 0",
+    execution_timezone="Europe/Berlin",
+    target=retrain_job,
 )
 def retrain_schedule() -> list[dg.RunRequest]:
     """Sunday 04:00: force-retrain everything; the registry keeps the champion."""
@@ -328,7 +503,9 @@ def retrain_schedule() -> list[dg.RunRequest]:
 
 
 @dg.schedule(
-    cron_schedule="0 3 1 * *", execution_timezone="Europe/Berlin", target=tune_job
+    cron_schedule="0 3 1 * *",
+    execution_timezone="Europe/Berlin",
+    target=tune_job,
 )
 def tune_schedule() -> list[dg.RunRequest]:
     """1st of month 03:00: re-tune every product, then re-backtest to judge."""
@@ -349,7 +526,7 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
             "time": datetime.now(BERLIN).isoformat(),
             "job": context.dagster_run.job_name,
             "run_id": context.dagster_run.run_id,
-            "error": str(getattr(event, "message", "") or "")[:500],
+            "step": getattr(event, "step_key", None) or "unknown",
         }
         ALERTS_LOG.parent.mkdir(parents=True, exist_ok=True)
         with ALERTS_LOG.open("a") as fh:
@@ -362,7 +539,8 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
                     f"• Job: `{record['job']}`\n"
                     f"• Run: `{record['run_id']}`\n"
                     f"• Time: {record['time']}\n"
-                    f"• Error: {record['error']}"
+                    f"• Step: `{record['step']}`\n"
+                    "• Details: Dagster run logs"
                 )
             }
             urllib.request.urlopen(
@@ -375,8 +553,8 @@ def ops_failure_alert(context: dg.RunStatusSensorContext) -> dg.SkipReason:
                 timeout=10,
             )
     except Exception as exc:  # noqa: BLE001 - alerting must never break the sensor
-        context.log.warning("alert sink failed: %s", exc)
-        return dg.SkipReason(f"alert sink failed: {exc}")
+        context.log.warning("alert sink failed: %s", type(exc).__name__)
+        return dg.SkipReason(f"alert sink failed: {type(exc).__name__}")
     context.log.error("run failed: %s (%s)", record["job"], record["run_id"])
     return dg.SkipReason("alert recorded")
 
@@ -391,7 +569,13 @@ defs = dg.Definitions(
         forecast_scores,
     ],
     asset_checks=[versioned_data_valid],
-    schedules=[gate_schedule, scores_schedule, retrain_schedule, tune_schedule],
+    schedules=[
+        source_refresh_schedule,
+        gate_schedule,
+        scores_schedule,
+        retrain_schedule,
+        tune_schedule,
+    ],
     jobs=[retrain_job, tune_job],
     sensors=[ops_failure_alert],
 )

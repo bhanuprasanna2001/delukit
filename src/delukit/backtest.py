@@ -4,9 +4,14 @@ One BacktestPipeline per gate (predict events at the gate, daily) with a
 shared weekly retrain schedule. Evaluation scores one band per lead day
 (d1..d10) by Berlin target day: per-day buckets are required because the
 evaluation keeps only the freshest forecast per timestamp.
+
+Strict replay requires reconstructed source vintages. The dataset guard
+rejects windows whose historical information set cannot be reproduced.
 """
 
+import uuid
 from datetime import date, datetime, time, timedelta
+from math import isfinite
 
 import pandas as pd
 from openstef_beam.backtesting import BacktestConfig, BacktestPipeline
@@ -22,7 +27,7 @@ from openstef_beam.evaluation.metric_providers import (
 from openstef_core.datasets import TimeSeriesDataset, VersionedTimeSeriesDataset
 from openstef_core.types import LeadTime, Q
 
-from delukit.core.clean import BERLIN
+from delukit.core.clean import BERLIN, UTC, day_bounds, quarter_grid
 from delukit.core.config.products import (
     BACKTEST_DIR,
     GATE_0530,
@@ -89,6 +94,9 @@ def run_backtest(
     Each weekly refit trains on all history (like production fits); pass
     training_days to bound the window for experiments.
     """
+    from delukit.dataset import assert_replayable
+
+    assert_replayable(start, end)
     ds = load()
     ground_truth, predictors = split_target(ds, target)
 
@@ -345,96 +353,165 @@ def main() -> None:
     evaluate(args.target, args.gate, args.span, predictions, ground_truth)
 
 
-def score_gate(day: date, gate: str) -> list[dict]:
-    """Score stored gate forecasts against arrived actuals; append to scores.
+def score_delivery_day(delivery_day: date, as_of: datetime) -> list[dict]:
+    """Score complete Berlin delivery days using only truth available by as_of.
 
-    Reads data/forecasts/<day>/<gate>_<span>/*.parquet, joins each target
-    with ground truth, and appends one row per (span, target) to the running
-    data/scores/scores.parquet table (deduplicated, so re-runs are safe).
-    Rows whose target days are not yet complete simply have no truth to join
-    and are skipped.
+    One row represents one target, gate, span and lead day. Incomplete inputs
+    produce a status row without metrics. Each delivery day has its own atomic
+    output file, so retries cannot append duplicate rows or rewrite an original
+    evaluation after later source revisions. Truth uses the latest observed
+    revision at first evaluation. Old 15:30 truth vintages are not reconstructed.
     """
     from openstef_core.datasets import ForecastDataset
 
-    from delukit.core.config.products import FORECAST_DIR, SCORES_DIR, SPANS
+    from delukit.core.config.products import FORECAST_DIR, SCORES_DIR, TARGETS
     from delukit.dataset import QUARTER
 
-    ds = load()
-    rows = []
-    for span in SPANS:
-        outdir = FORECAST_DIR / day.isoformat() / f"{gate}_{span}"
-        if not outdir.is_dir():
-            continue
-        # One file per (target x model); re-runs with a different fallback
-        # leave stale files behind, so score only the newest per target.
-        newest = {}
-        for path in sorted(outdir.glob("*__*.parquet")):
-            target, sep, _ = path.stem.rpartition("__")
-            if not sep or not target:
-                continue
-            cur = newest.get(target)
-            if cur is None or path.stat().st_mtime > cur.stat().st_mtime:
-                newest[target] = path
-        for target, path in sorted(newest.items()):
-            _, _, used = path.stem.rpartition("__")
-            frame = pd.read_parquet(path)
-            quantile_cols = [c for c in frame.columns if "quantile_" in c]
-            try:
-                part = next(p for p in ds.data_parts if target in p.feature_names)
-            except StopIteration:
-                continue
-            truth = part.select_version().data[[target]].dropna()
-            joined = frame[quantile_cols].join(truth, how="inner").dropna()
-            if joined.empty:
-                continue
-            subset = ForecastDataset(
-                joined, sample_interval=QUARTER, target_column=target
-            )
-
-            def _pick(out: dict, key: str, name: str) -> float:
-                # Providers return {quantile: {metric: value}} keyed by
-                # Quantile objects (repr "0.5") or "global".
-                return float(next(v[name] for k, v in out.items() if str(k) == key))
-
-            rmae = _pick(RMAEProvider(quantiles=[Q(0.5)])(subset), "0.5", "rMAE")
-            rcrps = _pick(RCRPSProvider()(subset), "global", "rCRPS")
-            observed = {
-                str(k): v["observed_probability"]
-                for k, v in ObservedProbabilityProvider()(subset).items()
-            }
-            rows.append(
-                {
-                    "day": day.isoformat(),
-                    "gate": gate,
-                    "span": span,
-                    "target": target,
-                    "model": used,
-                    "n": len(joined),
-                    "rmae": float(rmae),
-                    "rcrps": float(rcrps),
-                    "obs_p10": float(observed.get("0.1", float("nan"))),
-                    "obs_p50": float(observed.get("0.5", float("nan"))),
-                    "obs_p90": float(observed.get("0.9", float("nan"))),
-                }
-            )
-    if rows:
-        SCORES_DIR.mkdir(parents=True, exist_ok=True)
-        table_path = SCORES_DIR / "scores.parquet"
-        table = pd.concat(
-            [
-                pd.read_parquet(table_path)
-                if table_path.exists()
-                else pd.DataFrame(rows).iloc[0:0],
-                pd.DataFrame(rows),
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    cutoff = pd.Timestamp(as_of).tz_convert(UTC)
+    if cutoff > pd.Timestamp(datetime.now(UTC)):
+        raise ValueError("evaluation cutoff has not occurred")
+    _, delivery_end, _ = day_bounds(delivery_day)
+    if cutoff < delivery_end:
+        raise ValueError("delivery day has not ended at evaluation cutoff")
+    score_dir = SCORES_DIR / "delivery"
+    score_path = score_dir / f"{delivery_day.isoformat()}.parquet"
+    if score_path.exists():
+        saved = pd.read_parquet(score_path)
+        if (
+            not saved.empty
+            and saved["as_of"].nunique() == 1
+            and saved["as_of"].iloc[0] == cutoff.isoformat()
+        ):
+            return [
+                {key: None if pd.isna(value) else value for key, value in row.items()}
+                for row in saved.to_dict(orient="records")
             ]
+        raise ValueError(
+            f"existing score has a different evaluation cutoff: {score_path}"
         )
-        table = table.drop_duplicates(
-            subset=["day", "gate", "span", "target"], keep="last"
-        ).sort_values(["day", "gate", "span", "target"])
-        tmp = table_path.with_suffix(".tmp")
-        table.to_parquet(tmp)
-        tmp.replace(table_path)
-    print(f"scores {day} {gate}: {len(rows)} products scored")
+    grid = quarter_grid(delivery_day)
+    quantiles = ["quantile_P10", "quantile_P50", "quantile_P90"]
+    ds = load()
+    parts = {
+        target: next((p for p in ds.data_parts if target in p.feature_names), None)
+        for target in TARGETS
+    }
+    rows = []
+    for gate in ("0530", "1130"):
+        for span, leads in (("d1", (1,)), ("d10", range(1, 11))):
+            for lead in leads:
+                origin_day = delivery_day - timedelta(days=lead)
+                outdir = FORECAST_DIR / origin_day.isoformat() / f"{gate}_{span}"
+                for target in TARGETS:
+                    paths = list(outdir.glob(f"{target}__*.parquet"))
+                    path = (
+                        max(paths, key=lambda p: p.stat().st_mtime) if paths else None
+                    )
+                    row = {
+                        "delivery_day": delivery_day.isoformat(),
+                        "origin_day": origin_day.isoformat(),
+                        "gate": gate,
+                        "span": span,
+                        "lead_day": lead,
+                        "target": target,
+                        "model": path.stem.rpartition("__")[2] if path else None,
+                        "as_of": cutoff.isoformat(),
+                        "truth_basis": "latest_observed_vintage_at_evaluation",
+                        "status": "incomplete",
+                        "reason": None,
+                        "expected_n": len(grid),
+                        "forecast_n": 0,
+                        "truth_n": 0,
+                        "n": 0,
+                        "rmae": None,
+                        "rcrps": None,
+                        "obs_p10": None,
+                        "obs_p50": None,
+                        "obs_p90": None,
+                    }
+                    if path is None:
+                        row["reason"] = "forecast_missing"
+                        rows.append(row)
+                        continue
+                    frame = pd.read_parquet(path)
+                    delivery_frame = frame[frame.index.isin(grid)].sort_index()
+                    row["forecast_n"] = len(delivery_frame)
+                    if not delivery_frame.index.equals(grid) or not set(
+                        quantiles
+                    ).issubset(delivery_frame.columns):
+                        row["reason"] = "forecast_grid_or_schema"
+                        rows.append(row)
+                        continue
+                    if delivery_frame[quantiles].isna().any().any():
+                        row["reason"] = "forecast_values_missing"
+                        rows.append(row)
+                        continue
+                    part = parts[target]
+                    if part is None:
+                        row["reason"] = "truth_source_missing"
+                        rows.append(row)
+                        continue
+                    versions = part.data.loc[
+                        part.data.index.isin(grid), [target, "available_at"]
+                    ]
+                    versions = versions[versions["available_at"] <= cutoff]
+                    versions = versions.sort_values("available_at")
+                    versions = versions[~versions.index.duplicated(keep="last")]
+                    truth = versions[target].reindex(grid)
+                    row["truth_n"] = int(truth.notna().sum())
+                    row["n"] = row["truth_n"]
+                    if row["truth_n"] != len(grid):
+                        row["reason"] = "truth_unavailable_at_cutoff"
+                        rows.append(row)
+                        continue
+                    joined = delivery_frame[quantiles].assign(**{target: truth})
+                    subset = ForecastDataset(
+                        joined, sample_interval=QUARTER, target_column=target
+                    )
+
+                    def pick(out: dict, key: str, name: str) -> float:
+                        return float(
+                            next(v[name] for k, v in out.items() if str(k) == key)
+                        )
+
+                    row["rmae"] = pick(
+                        RMAEProvider(quantiles=[Q(0.5)])(subset), "0.5", "rMAE"
+                    )
+                    row["rcrps"] = pick(RCRPSProvider()(subset), "global", "rCRPS")
+                    observed = {
+                        str(k): v["observed_probability"]
+                        for k, v in ObservedProbabilityProvider()(subset).items()
+                    }
+                    for quantile, column in (
+                        ("0.1", "obs_p10"),
+                        ("0.5", "obs_p50"),
+                        ("0.9", "obs_p90"),
+                    ):
+                        row[column] = float(observed[quantile])
+                    if not all(
+                        isfinite(row[key])
+                        for key in ("rmae", "rcrps", "obs_p10", "obs_p50", "obs_p90")
+                    ):
+                        row.update(
+                            status="incomplete",
+                            reason="metrics_unavailable",
+                            rmae=None,
+                            rcrps=None,
+                            obs_p10=None,
+                            obs_p50=None,
+                            obs_p90=None,
+                        )
+                    else:
+                        row["status"] = "complete"
+                    rows.append(row)
+    score_dir.mkdir(parents=True, exist_ok=True)
+    tmp = score_path.with_name(f".{score_path.stem}.{uuid.uuid4().hex}.tmp")
+    pd.DataFrame(rows).to_parquet(tmp, index=False)
+    tmp.replace(score_path)
+    complete = sum(row["status"] == "complete" for row in rows)
+    print(f"scores {delivery_day}: {complete}/{len(rows)} complete")
     return rows
 
 
