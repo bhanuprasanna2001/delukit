@@ -33,8 +33,8 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 ## ✨ Why delukit
 
 - 🔮 **24 XGBoost models** — 6 targets × 2 gates × 2 spans, point *and* probabilistic
-- 🕰️ **Point-in-time correct** — every row knows when it became known, so gates never train on the future
-- ⚡ **Two fresh forecasts a day** — full chain runs at 05:30 / 11:30 Berlin time
+- 🕰️ **Observed cutoffs** - provider responses carry fetch times; strict replay rejects history without proven vintages
+- ⚡ **Two forecasts a day** - refresh before 05:30 / 11:30 Berlin gates, then predict from the committed snapshot
 - 📈 **1-day + 10-day horizons** — day-ahead precision meets 10-day planning
 - 📦 **One command to run** — `docker compose up --build` gives you app + pipeline
 - 🔑 **API with keys & quotas** — anonymous exploration, keyed `/v1` for real use
@@ -53,7 +53,7 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 <p align="center">
   <img src="public/dagster.svg" alt="Dagster asset graph from raw sync to forecasts" width="100%" />
   <br />
-  <sub>Six assets, four schedules — the 05:30/11:30 gates run the full chain; scoring and retraining follow.</sub>
+  <sub>Six assets, five schedules - refresh precedes both gates and the 15:30 completed-day evaluation.</sub>
 </p>
 
 ## 🚀 Quickstart — 60 seconds
@@ -81,16 +81,18 @@ flowchart LR
     G --> F[forecasts]
 ```
 
-Raw provider payloads → quarter-hour clean tables → point-in-time versioned parts → **24 XGBoost models** → parquet + plots in `data/forecasts`. Serving lives in [`delu/`](delu/README.md) — one FastAPI process serves UI *and* API.
+Raw provider observations → quarter-hour clean tables → conservatively timestamped versioned parts → **24 product workflows** → parquet + plots in `data/forecasts`. Serving lives in [`delu/`](delu/README.md) in one FastAPI process.
+
+Old raw files are stamped with the time this version first observes them. That time does not reconstruct earlier provider revisions. Strict backtests reject windows without sufficient observation history; see [the architecture and migration contract](docs/architecture.md).
 
 ## ⌨️ CLI
 
 | Command | Does |
 |---|---|
-| `delukit` | Sync ENTSO-E, SMARD, weather, calendar into `data/raw` |
+| `delukit` | Refresh the recent provider window into `data/raw`; `--since YYYY-MM-DD` repairs older dates |
 | `delukit-clean` | Raw → `data/clean/*.parquet` |
 | `delukit-dataset` | Clean → `data/versioned` + gate-replay validation (`--validate-only` to just check) |
-| `delukit-forecast` | Fit + predict one gate, e.g. `--gate 1130 --span d1 [--date 2026-09-21]` |
+| `delukit-forecast` | Fit + predict a live gate, e.g. `--gate 1130 --span d1` |
 | `delukit-backtest` | Replay a product over history, score per lead day |
 | `delukit-tune` | Optuna-tune one product into `data/tuning` |
 
@@ -153,12 +155,13 @@ uv run dagster dev -m delukit.dagster_app.definitions -p 3000
 
 | Schedule | Runs |
 |---|---|
-| 🌅 05:30 + 11:30 daily | Full chain: sync → clean → versioned → both spans |
-| 🧮 15:30 daily | Score yesterday's gates against arrived actuals |
-| 🏆 Sunday 02:00 | Retrain all products, registry keeps the champion |
-| 🎛️ 1st of month 03:00 | Re-tune all products |
+| 05:00, 11:00, 15:00 daily | Refresh sources and commit a validated dataset before each dependent run |
+| 05:30 + 11:30 daily | Forecast both spans from the committed pre-gate snapshot |
+| 15:30 daily | Score yesterday's completed Berlin delivery day and send one Slack digest |
+| Sunday 04:00, optional | Retrain all products if the schedule is enabled |
+| 1st of month 03:00, optional | Re-tune all products if the schedule is enabled |
 
-The versioned-data check **blocks forecasts on bad data**. Writes are idempotent, partitions retry twice, failures append to `data/ops/alerts.log` and POST `DELUKIT_ALERT_WEBHOOK` when set.
+The refresh, gate, and score schedules start enabled. A validated snapshot marker blocks gates and scoring if refresh missed its window or left partial files. Failed runs append to `data/ops/alerts.log` and POST `DELUKIT_ALERT_WEBHOOK` when set. The 15:30 digest reports score coverage, metrics, and fallback counts. Weekly retraining and monthly tuning remain opt-in.
 
 ## ⚙️ Configuration
 
@@ -168,7 +171,7 @@ The versioned-data check **blocks forecasts on bad data**. Writes are idempotent
 |---|---|
 | `RESEND_API_KEY` | Verify + contact mail (falls back to SMTP, logs locally if empty) |
 | `DELU_PUBLIC_URL` | Host baked into verify links |
-| `DELUKIT_ALERT_WEBHOOK` | Slack alert on failed runs |
+| `DELUKIT_ALERT_WEBHOOK` | Slack failed-run alerts and 15:30 score digest |
 | `DELU_COOKIE_SECURE` | Set `1` over https |
 
 ## 🙏 Data attribution

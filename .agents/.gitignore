@@ -1,0 +1,7 @@
+*
+!.gitignore
+!skills/
+!skills/verify-delu/
+!skills/verify-delu/**
+skills/verify-delu/**/__pycache__/
+skills/verify-delu/**/*.pyc
