@@ -7,6 +7,8 @@ tests pin the 'every re-fetch looks updated' bug.
 
 from datetime import date
 
+import pytest
+
 
 # --- SMARD ---
 def test_smard_parse_envelopes():
@@ -44,7 +46,7 @@ def test_smard_number_and_slug_and_columns():
     assert _columns("day_ahead_prices", []) == "price_day_ahead_eur_mwh"
 
 
-def test_smard_fetch_day_cache_and_write(tmp_dirs, monkeypatch):
+def test_smard_fetch_day_caches_old_file(tmp_dirs, monkeypatch):
     from delukit.sources import smard
 
     day = date(2026, 1, 5)
@@ -63,22 +65,24 @@ def test_smard_fetch_day_cache_and_write(tmp_dirs, monkeypatch):
             pass
 
     class FakeSession:
+        posts = 0
+
         def post(self, *a, **k):
+            self.posts += 1
             return FakeResp()
 
         def close(self):
             pass
 
     monkeypatch.setattr(smard.time, "sleep", lambda *a: None)
+    session = FakeSession()
     assert (
-        smard.fetch_day("load_actual", day, today=today, session=FakeSession())
-        == "fetched"
+        smard.fetch_day("load_actual", day, today=today, session=session) == "fetched"
     )
-    # second call same body -> unchanged (header-strip not needed here, identical)
     assert (
-        smard.fetch_day("load_actual", day, today=today, session=FakeSession())
-        == "unchanged"
+        smard.fetch_day("load_actual", day, today=today, session=session) == "unchanged"
     )
+    assert session.posts == 1
 
 
 # --- ENTSO-E ---
@@ -102,6 +106,29 @@ def test_entsoe_window_is_berlin_day_in_utc():
     start, end = _window(date(2026, 1, 5))
     assert start == "202601042300"  # midnight Berlin = 23:00 UTC prev day (winter)
     assert end == "202601052300"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["smard", "entsoe"],
+)
+def test_fetch_day_replaces_changed_snapshot(tmp_dirs, monkeypatch, source):
+    from delukit.sources import entsoe, smard
+
+    module = {"entsoe": entsoe, "smard": smard}[source]
+    bodies = iter([b"original", b"revised"])
+    day = date(2026, 1, 5)
+    monkeypatch.setattr(module, "_download", lambda *args: next(bodies))
+    monkeypatch.setattr(module, "_parse", lambda body: body)
+    assert (
+        module.fetch_day("load_actual", day, today=day, session=object()) == "fetched"
+    )
+    assert (
+        module.fetch_day("load_actual", day, today=day, session=object()) == "updated"
+    )
+
+    path = tmp_dirs["raw"] / day.isoformat() / source / "load_actual" / "data.xml"
+    assert path.read_bytes() == b"revised"
 
 
 def test_entsoe_series_key():
@@ -167,8 +194,6 @@ def test_weather_fetch_day_immutable(tmp_dirs):
 
 # --- Calendar ---
 def test_calendar_records_validation():
-    import pytest
-
     from delukit.sources.calendar import _parse_records
 
     good = b'[{"startDate": "2026-01-01", "endDate": "2026-01-01", "nationwide": true, "subdivisions": [{"code": "BY"}], "name": []}]'
@@ -233,8 +258,6 @@ def test_calendar_fetch_day_writes_and_unchanged(tmp_dirs, monkeypatch):
 # --- Energy-Charts ---
 def test_energy_charts_parse():
     import json
-
-    import pytest
 
     from delukit.sources.energy_charts import _parse, fetch_day
 

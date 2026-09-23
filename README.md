@@ -33,7 +33,7 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 ## ✨ Why delukit
 
 - 🔮 **24 XGBoost models** — 6 targets × 2 gates × 2 spans, point *and* probabilistic
-- 🕰️ **Point-in-time correct** — every row knows when it became known, so gates never train on the future
+- 🕰️ **Modeled gate cutoffs.** Every row has an assigned availability time
 - ⚡ **Two fresh forecasts a day** — full chain runs at 05:30 / 11:30 Berlin time
 - 📈 **1-day + 10-day horizons** — day-ahead precision meets 10-day planning
 - 📦 **One command to run** — `docker compose up --build` gives you app + pipeline
@@ -81,7 +81,9 @@ flowchart LR
     G --> F[forecasts]
 ```
 
-Raw provider payloads → quarter-hour clean tables → point-in-time versioned parts → **24 XGBoost models** → parquet + plots in `data/forecasts`. Serving lives in [`delu/`](delu/README.md) — one FastAPI process serves UI *and* API.
+Raw provider payloads → quarter-hour clean tables → availability-stamped parts → **24 XGBoost models** → parquet + plots in `data/forecasts`. Serving lives in [`delu/`](delu/README.md). One FastAPI process serves the UI and API.
+
+`available_at` applies configured publication times to retained values. ENTSO-E and SMARD refreshes replace each daily file, so historical replay uses the latest retained revision. It cannot reconstruct the value seen at an earlier gate. Weather retains separate model runs.
 
 ## ⌨️ CLI
 
@@ -182,5 +184,5 @@ Small PRs with a test. `uv run pre-commit install` once, then `uv run pytest -q`
 ---
 
 <div align="center">
-  <sub>Built by <a href="mailto:bhanu.prasanna2001@gmail.com">Bhanu Prasanna</a> — forecasts that respect what was known when.</sub>
+  <sub>Built by <a href="mailto:bhanu.prasanna2001@gmail.com">Bhanu Prasanna</a> · forecasts gated by modeled availability.</sub>
 </div>

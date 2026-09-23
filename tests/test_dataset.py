@@ -1,10 +1,3 @@
-"""Versioned point-in-time parts: availability stamps must never leak.
-
-Why these: a wrong available_at leaks future data into the gate (inflated
-skill) or hides known data (degraded forecasts). Guard test pins the loud
-failure on schema drift.
-"""
-
 from datetime import date, timedelta
 from datetime import time as dtime
 

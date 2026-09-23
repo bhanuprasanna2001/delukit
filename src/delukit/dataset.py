@@ -1,13 +1,13 @@
-"""Versioned point-in-time dataset: data/clean -> data/versioned.
+"""Availability-stamped dataset: data/clean -> data/versioned.
 
-Build splits the cleaned tables into one TimeSeriesDataset part per
-publication event, every row stamped with its ``available_at`` moment
-(rules: core/config/availability.py). Validate replays the 05:30/11:30
-gates over history and asserts the visible information set matches the
-measured availability contract.
+Build splits the latest clean tables into one TimeSeriesDataset part per
+publication event. It assigns each row an ``available_at`` from the rules in
+core/config/availability.py. Validate replays the 05:30 and 11:30 gates and
+checks those configured rules.
 
-Day-ahead curves are stored as their final revision; same-day revisions
-after publication are not reconstructed.
+ENTSO-E and SMARD retain one daily payload per category. Historical parts
+therefore contain the latest retained revision, not the revision proven to
+exist at a past gate. Weather retains separate forecast runs.
 """
 
 import sys
@@ -49,14 +49,12 @@ WEATHER_FFILL_LIMIT = 7
 def _delayed(
     df: pd.DataFrame, columns: list[str], delay: timedelta
 ) -> TimeSeriesDataset:
-    """Actuals: known ``delay`` after the quarter they describe."""
     out = df[columns]
     out = out.assign(available_at=out.index + delay)
     return TimeSeriesDataset(out, sample_interval=QUARTER)
 
 
 def _published(df: pd.DataFrame, columns: list[str], wall: dtime) -> TimeSeriesDataset:
-    """Day-ahead curve: all of Berlin day T is published on T-1 at ``wall``."""
     out = df[columns]
     publish_day = pd.to_datetime(out.index.tz_convert(BERLIN).date) - pd.Timedelta(
         days=1
@@ -210,7 +208,6 @@ def _gate(day: date, wall: dtime) -> pd.Timestamp:
 
 
 def _visible(part: TimeSeriesDataset, day: date, gate: pd.Timestamp) -> pd.DataFrame:
-    """Rows describing ``day`` that were already visible at ``gate``."""
     start, end, _ = day_bounds(day)
     return part.filter_by_range(start, end).filter_by_available_before(gate).data
 
@@ -274,7 +271,7 @@ def _validation_days(parts: dict[str, TimeSeriesDataset]) -> tuple[list[date], C
 
 
 def validate() -> int:
-    """Replay the gates over history and assert the availability contract."""
+    """Replay historical gates and check the configured availability rules."""
     ds = load()
     parts = dict(
         zip(

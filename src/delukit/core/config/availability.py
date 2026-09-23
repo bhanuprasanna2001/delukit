@@ -1,13 +1,12 @@
-"""Point-in-time availability rules for the versioned dataset.
+"""Modeled availability rules for the versioned dataset.
 
-Every row in data/versioned carries an ``available_at`` timestamp: the
-moment it first became known. The rules below are the measured publication
-latencies of the 05:30/11:30 (Berlin) forecast runs, not documentation
-defaults.
+Every row in data/versioned carries an assigned ``available_at`` timestamp.
+The rules model publication timing for the 05:30 and 11:30 Berlin forecast
+runs. They do not record when a specific provider revision was observed.
 
-Tuning direction: later is safer (a value can never leak into a gate), too
-late only costs edge rows at the gates. Berlin wall clock unless the name
-says UTC.
+Moving a rule later admits fewer rows at a gate. It cannot reconstruct a
+provider revision that the raw daily file no longer retains. Times use the
+Berlin wall clock unless a name says UTC.
 """
 
 from datetime import time as dtime
@@ -16,7 +15,6 @@ from datetime import timedelta
 # Forecast moments, Berlin wall clock.
 GATES = (dtime(5, 30), dtime(11, 30))
 
-# Measured actuals latency: each quarter is published shortly after it ends.
 ENTSOE_ACTUALS_DELAY = timedelta(minutes=75)  # ~04:15 at 05:30, ~10:15 at 11:30
 SMARD_ACTUALS_DELAY = timedelta(hours=3)  # ~02:30 at 05:30, ~08:30 at 11:30
 

@@ -8,7 +8,7 @@ hands models from training to prediction across processes.
 Assets (upstream -> downstream):
   raw_data        sync providers into data/raw (delukit.main, incremental)
   clean_data      raw -> data/clean/*.parquet (per-source builders)
-  versioned_data  clean -> data/versioned/*.parquet (point-in-time parts)
+  versioned_data  clean -> data/versioned/*.parquet (availability-stamped parts)
   forecast_d1     one gate run, day-ahead span (run_gate, fallback inside)
   forecast_d10    one gate run, 10-day span (same)
   forecast_scores daily errors of stored forecasts vs arrived actuals
@@ -19,7 +19,7 @@ multi-partitions at two dimensions, hence separate d1/d10 assets sharing
 one partitions definition. Everything written is idempotent (tmp+replace,
 date-scoped paths, deduplicated scores), so retries and backfills are safe.
 
-Checks: versioned_data_valid (blocking) replays the availability contract;
+Checks: versioned_data_valid (blocking) replays the configured availability rules;
 a forecast partition that fails its sanity check raises, which fails the
 run and fires the failure sensor instead of publishing silently.
 
@@ -100,7 +100,7 @@ def clean_data(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
 @dg.asset(
     deps=[clean_data],
-    description="Clean tables -> versioned point-in-time parts.",
+    description="Clean tables -> availability-stamped versioned parts.",
 )
 def versioned_data(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     from delukit.dataset import build, load
@@ -118,7 +118,6 @@ def versioned_data(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
 @dg.asset_check(asset=versioned_data, blocking=True)
 def versioned_data_valid() -> dg.AssetCheckResult:
-    """Replay the availability contract; block forecasts on bad data."""
     from delukit.dataset import validate
 
     passed = validate() == 0
