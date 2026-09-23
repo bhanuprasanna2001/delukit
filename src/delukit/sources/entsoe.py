@@ -14,9 +14,10 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from delukit.core.config import BASE_DIR, REFRESH_DAYS, TIMEZONE
+from delukit.core.config import BASE_DIR, TIMEZONE
 from delukit.core.config.entsoe import ENTSOE_URL, entsoe_params
 from delukit.core.parallel import RateLimited, run_parallel
+from delukit.sources.observations import observe
 
 log = logging.getLogger(__name__)
 
@@ -89,17 +90,8 @@ def _parse(body):
     return body
 
 
-def _cached(category, day, today):
+def fetch_day(category, day, session=None):
     path = BASE_DIR / day.isoformat() / "entsoe" / category / "data.xml"
-    return path.exists() and (today - day).days > REFRESH_DAYS
-
-
-def fetch_day(category, day, today=None, session=None):
-    path = BASE_DIR / day.isoformat() / "entsoe" / category / "data.xml"
-    today = today or datetime.now(ZoneInfo(TIMEZONE)).date()
-
-    if _cached(category, day, today):
-        return "unchanged"
 
     own = session is None
     session = session or requests.Session()
@@ -109,10 +101,15 @@ def fetch_day(category, day, today=None, session=None):
         if own:
             session.close()
     if body is None:
-        return "unchanged" if path.exists() else "no_data"
+        if path.exists():
+            raise RuntimeError(
+                f"ENTSO-E returned no data for previously fetched {category} {day}"
+            )
+        return "no_data"
     if body is False:
         raise ValueError(f"invalid XML: {category} {day}")
 
+    observe(path, body, semantic=_comparable(body))
     if path.exists() and _comparable(path.read_bytes()) == _comparable(body):
         return "unchanged"
 
@@ -125,30 +122,21 @@ def fetch_day(category, day, today=None, session=None):
 
 
 def sync(start, end, on_each=None):
-    today = end - timedelta(days=1)
-
     work = []
-    skipped = 0
     day = start
     while day <= end:
         for category in entsoe_params:
-            if _cached(category, day, today):
-                skipped += 1
-                if on_each:
-                    on_each(category, day, "unchanged")
-            else:
-                work.append((category, day))
+            work.append((category, day))
         day += timedelta(days=1)
 
     with requests.Session() as session:
         session.headers.update({"user-agent": "delukit"})
         counts = run_parallel(
             work,
-            lambda c, d: fetch_day(c, d, today=today, session=session),
+            lambda c, d: fetch_day(c, d, session=session),
             WORKERS,
             on_each,
         )
-    counts["unchanged"] += skipped
     return counts
 
 

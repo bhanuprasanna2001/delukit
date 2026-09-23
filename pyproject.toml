@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-delukit = "delukit.main:main"
+delukit = "delukit.main:cli"
 delukit-clean = "delukit.clean:main"
 delukit-dataset = "delukit.dataset:main"
 delukit-forecast = "delukit.forecast:main"

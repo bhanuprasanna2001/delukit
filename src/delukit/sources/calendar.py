@@ -38,6 +38,7 @@ from delukit.core.config.calendar import (
     calendar_countries,
 )
 from delukit.core.parallel import run_parallel
+from delukit.sources.observations import observe
 
 log = logging.getLogger(__name__)
 
@@ -159,13 +160,14 @@ def _fresh(path):
 def _year_records(session, kind, iso, year, today):
     """Raw records for one country/kind/year, from cache when usable."""
     path = OPENHOLIDAYS_CACHE_DIR / iso / kind / f"{year}.json"
-    if path.exists() and (year < today.year or _fresh(path)):
+    if path.exists() and _fresh(path):
         return _parse_records(path.read_bytes(), f"cache: {path}", kind)
     with _fetch_lock:  # one fetch per file; concurrent days share it
-        if path.exists() and (year < today.year or _fresh(path)):
+        if path.exists() and _fresh(path):
             return _parse_records(path.read_bytes(), f"cache: {path}", kind)
         payload = _download(session, kind, iso, year)
         records = _parse_records(payload, f"response: {iso}/{kind}/{year}", kind)
+        observe(path, payload)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(payload)
@@ -279,9 +281,12 @@ def fetch_day(category, day, today=None, session=None):
             session.close()
 
     if path.exists() and path.read_bytes() == body:
+        if not any((path.parent / "observations").glob("*.json")):
+            observe(path, body)
         return "unchanged"
 
     state = "updated" if path.exists() else "fetched"
+    observe(path, body)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(body)

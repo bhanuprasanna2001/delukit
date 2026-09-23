@@ -2,8 +2,8 @@
 
 Layout: data/raw/<day>/weather/<land|sea>/data.json
 
-Each file holds one model's 00z run for every location in the group.
-Runs are immutable: a file, once written, is never re-fetched.
+Each file holds the latest observed revision of one model's 00z run for every
+location in the group. Earlier responses remain in observations/.
 """
 
 import json
@@ -11,7 +11,7 @@ import logging
 import re
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import requests
 
@@ -24,6 +24,7 @@ from delukit.core.config.weather import (
     WEATHER_URL,
 )
 from delukit.core.parallel import RateLimited, run_parallel
+from delukit.sources.observations import observe
 
 log = logging.getLogger(__name__)
 
@@ -130,9 +131,6 @@ def _parse(body, group):
 def fetch_day(group, day, session=None):
     path = BASE_DIR / day.isoformat() / "weather" / group / "data.json"
 
-    if path.exists():  # runs never change; fetch each run once
-        return "unchanged"
-
     own = session is None
     session = session or requests.Session()
     try:
@@ -141,29 +139,35 @@ def fetch_day(group, day, session=None):
         if own:
             session.close()
     if body is None:
+        if path.exists():
+            raise RuntimeError(
+                f"Open-Meteo returned no data for previously fetched {group} {day}"
+            )
         return "no_data"
     if body is False:
         raise ValueError(f"invalid JSON: {group} {day}")
 
+    observe(
+        path,
+        body,
+        source_issued_at=datetime(day.year, day.month, day.day, tzinfo=UTC),
+    )
+    if path.exists() and path.read_bytes() == body:
+        return "unchanged"
+    state = "updated" if path.exists() else "fetched"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(body)
     tmp.replace(path)
-    return "fetched"
+    return state
 
 
 def sync(start, end, on_each=None):
     work = []
-    skipped = 0
     day = start
     while day <= end:
         for group in WEATHER_LOCATIONS:
-            if (BASE_DIR / day.isoformat() / "weather" / group / "data.json").exists():
-                skipped += 1
-                if on_each:
-                    on_each(group, day, "unchanged")
-            else:
-                work.append((group, day))
+            work.append((group, day))
         day += timedelta(days=1)
 
     with requests.Session() as session:
@@ -174,15 +178,14 @@ def sync(start, end, on_each=None):
             WORKERS,
             on_each,
         )
-    counts["unchanged"] += skipped
     return counts
 
 
 def to_clean(days=None):
     """Parse every raw run-file into versioned data/clean/weather.parquet.
 
-    One row per run x location x valid hour. ``available_at`` is the run's
-    00z issue time, so downstream can replay what was known when.
+    One row per run x location x valid hour. The raw run day is model
+    initialization; dataset.build raises availability to the observed fetch.
     """
     import json
 

@@ -92,7 +92,7 @@ def test_smard_parts_derives_total_and_skips_price(qindex):
     assert (parts["smard_actuals"].data["gen_actual_total_mwh"] == 12.0).all()
 
 
-def test_calendar_part_drops_strings_and_renames(qindex):
+def test_calendar_part_excludes_unproven_holiday_vintage(qindex):
     from delukit.dataset import _calendar_part
 
     df = _frame(
@@ -102,7 +102,10 @@ def test_calendar_part_drops_strings_and_renames(qindex):
         school_subdivisions=["BY|BW"] * 4,  # identifier, not a feature
     )
     part = _calendar_part(df)
-    assert "is_holiday_delu" in part.feature_names
+    assert "is_holiday_delu" not in part.feature_names
+    assert "is_holiday" not in part.feature_names
+    assert "is_weekend" in part.feature_names
+    assert "day_of_week" in part.feature_names
     assert "school_subdivisions" not in part.feature_names
 
 
@@ -153,3 +156,38 @@ def test_visible_filters_by_gate(qindex):
     # gate before any data -> nothing visible
     early = _gate(date(2026, 1, 4), dtime(5, 30))
     assert _visible(part, date(2026, 1, 5), early).empty
+
+
+def test_post_gate_provider_fetch_cannot_enter_earlier_gate(tmp_dirs, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from openstef_core.datasets import TimeSeriesDataset
+
+    from delukit.dataset import _observed_part
+    from delukit.sources import observations
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, _zone):
+            return datetime(2026, 1, 5, 10, 45, tzinfo=UTC)
+
+    monkeypatch.setattr(observations, "datetime", Clock)
+    current = tmp_dirs["raw"] / "2026-01-06" / "entsoe" / "EXAA" / "data.xml"
+    current.parent.mkdir(parents=True)
+    current.write_bytes(b"<TimeSeries/>")
+    observations.observe(current, current.read_bytes(), semantic=current.read_bytes())
+    idx = pd.DatetimeIndex([pd.Timestamp("2026-01-06T00:00:00Z")])
+    part = TimeSeriesDataset(
+        pd.DataFrame(
+            {
+                "price_exaa_eur_mwh": [50.0],
+                "available_at": [pd.Timestamp("2026-01-05T10:30:00Z")],
+            },
+            index=idx,
+        ),
+        sample_interval=timedelta(minutes=15),
+    )
+    observed = _observed_part(part, "entsoe", {"EXAA": ["price_exaa_eur_mwh"]})
+    gate = pd.Timestamp("2026-01-05T10:30:00Z")
+    assert observed.data["available_at"].iloc[0] == pd.Timestamp("2026-01-05T10:45:00Z")
+    assert observed.filter_by_available_before(gate).data.empty

@@ -7,6 +7,8 @@ tests pin the 'every re-fetch looks updated' bug.
 
 from datetime import date
 
+import pytest
+
 
 # --- SMARD ---
 def test_smard_parse_envelopes():
@@ -48,7 +50,6 @@ def test_smard_fetch_day_cache_and_write(tmp_dirs, monkeypatch):
     from delukit.sources import smard
 
     day = date(2026, 1, 5)
-    today = date(2026, 1, 20)  # old enough to be cached once written
     body = (
         b"<Categories><Category><Components><Component><Values>"
         b"<Value_detail><Value>1</Value></Value_detail>"
@@ -70,15 +71,9 @@ def test_smard_fetch_day_cache_and_write(tmp_dirs, monkeypatch):
             pass
 
     monkeypatch.setattr(smard.time, "sleep", lambda *a: None)
-    assert (
-        smard.fetch_day("load_actual", day, today=today, session=FakeSession())
-        == "fetched"
-    )
+    assert smard.fetch_day("load_actual", day, session=FakeSession()) == "fetched"
     # second call same body -> unchanged (header-strip not needed here, identical)
-    assert (
-        smard.fetch_day("load_actual", day, today=today, session=FakeSession())
-        == "unchanged"
-    )
+    assert smard.fetch_day("load_actual", day, session=FakeSession()) == "unchanged"
 
 
 # --- ENTSO-E ---
@@ -155,14 +150,43 @@ def test_weather_parse():
     )
 
 
-def test_weather_fetch_day_immutable(tmp_dirs):
+def test_weather_fetch_day_rechecks_run_and_keeps_revision(tmp_dirs, monkeypatch):
     from delukit.sources import weather
 
     day = date(2026, 1, 5)
     path = tmp_dirs["raw"] / "2026-01-05" / "weather" / "land" / "data.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"[]")
-    assert weather.fetch_day("land", day) == "unchanged"
+    path.write_bytes(b"old")
+    monkeypatch.setattr(weather, "_download", lambda *_args: b"new")
+    monkeypatch.setattr(weather, "_parse", lambda body, _group: body)
+    assert weather.fetch_day("land", day, session=object()) == "updated"
+    assert path.read_bytes() == b"new"
+    assert weather.fetch_day("land", day, session=object()) == "unchanged"
+    assert len(list((path.parent / "observations").glob("*.json"))) == 2
+
+
+@pytest.mark.parametrize(
+    ("source", "category", "filename"),
+    [
+        ("entsoe", "load_actual", "data.xml"),
+        ("smard", "load_actual", "data.xml"),
+        ("weather", "land", "data.json"),
+    ],
+)
+def test_previously_fetched_provider_file_cannot_silently_go_empty(
+    tmp_dirs, monkeypatch, source, category, filename
+):
+    from delukit.sources import entsoe, smard, weather
+
+    module = {"entsoe": entsoe, "smard": smard, "weather": weather}[source]
+    day = date(2026, 1, 5)
+    path = tmp_dirs["raw"] / day.isoformat() / source / category / filename
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"old")
+    monkeypatch.setattr(module, "_download", lambda *_args: b"empty")
+    monkeypatch.setattr(module, "_parse", lambda *_args: None)
+    with pytest.raises(RuntimeError, match="returned no data"):
+        module.fetch_day(category, day, session=object())
 
 
 # --- Calendar ---

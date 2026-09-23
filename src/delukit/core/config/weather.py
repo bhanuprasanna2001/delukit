@@ -1,7 +1,7 @@
 """Open-Meteo single-runs API, ecmwf_ifs 00z runs.
 
-One cell_selection per request, so locations are grouped:
-2 requests per day, runs immutable.
+One cell_selection per request, so locations are grouped into two requests
+per run day. Fetches retain provider revisions.
 """
 
 WEATHER_URL = "https://single-runs-api.open-meteo.com/v1/forecast"

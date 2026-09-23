@@ -65,11 +65,23 @@ GATE_WALL = {f"{wall:%H%M}": wall for wall in GATES}
 PRIMARY_MODEL = "xgboost"
 # constant_quantile first: it needs only 3% target history, no lag pipeline.
 FALLBACK_MODELS = ("constant_quantile", "median", "flatliner")
+MAX_GATE_DELAY = timedelta(hours=4)
 
 
 def gate_datetime(day: date, gate: str) -> pd.Timestamp:
     """Gate moment in UTC for a Berlin day."""
     return pd.Timestamp(datetime.combine(day, GATE_WALL[gate], BERLIN)).tz_convert(UTC)
+
+
+def assert_live_gate(day: date, gate: str, now: datetime | None = None) -> None:
+    """Keep stored operational forecasts distinct from historical replays."""
+    current = pd.Timestamp(now or datetime.now(UTC)).tz_convert(UTC)
+    origin = gate_datetime(day, gate)
+    if not origin <= current < origin + MAX_GATE_DELAY:
+        raise ValueError(
+            f"{day} {gate} is outside its live gate window; "
+            "use delukit-backtest for historical replay"
+        )
 
 
 def workflow_config(
@@ -190,19 +202,40 @@ def fit_product(
     train_days: int | None = None,
     registry: bool = False,
     force_retrain: bool = False,
+    as_of: datetime | None = None,
 ) -> CustomForecastingWorkflow | None:
-    """Fit on all history as known now. None when the registry skips.
+    """Fit on history known at the cutoff. None when the registry skips.
 
     force_retrain disables model reuse so the fit really runs (weekly
     retrain); gate runs leave it off to reuse recent models.
     """
-    now = datetime.now(UTC)
+    now = as_of or datetime.now(UTC)
     ds = load()
-    if train_days is not None:
-        ds = ds.filter_by_range(now - timedelta(days=train_days), now)
+    ds = ds.filter_by_range(
+        now - timedelta(days=train_days) if train_days is not None else None, now
+    )
     data = ds.filter_by_available_before(now).select_version()
+    config = None
+    if as_of is not None:
+        # A reused or selected MLflow model has no recorded feature cutoff.
+        # A gate fit must use only this gate's training snapshot.
+        config = workflow_config(
+            target,
+            gate,
+            span,
+            model=model,
+            registry=registry,
+            model_reuse_enable=False,
+        )
+        config.model_selection_enable = False
     workflow = create_workflow(
-        target, gate, span, model=model, registry=registry, force_retrain=force_retrain
+        target,
+        gate,
+        span,
+        model=model,
+        registry=registry,
+        config=config,
+        force_retrain=force_retrain,
     )
     workflow.fit(data)
     return workflow if workflow.model.is_fitted else None
@@ -259,6 +292,7 @@ def predict_with_fallback(
                 span,
                 model=model,
                 registry=registry and model == PRIMARY_MODEL,
+                as_of=gate_datetime(day, gate),
             )
             if workflow is None:  # registry skipped the re-fit; load the stored model
                 workflow = create_workflow(target, gate, span, registry=True)
@@ -314,6 +348,7 @@ def run_gate(
     day: date, gate: str, span: str, targets: tuple[str, ...], *, registry: bool
 ) -> None:
     """Fit + predict every target at the gate; write data/forecasts/<day>/<gate>_<span>/."""
+    assert_live_gate(day, gate)
     outdir = FORECAST_DIR / day.isoformat() / f"{gate}_{span}"
     outdir.mkdir(parents=True, exist_ok=True)
     for target in targets:

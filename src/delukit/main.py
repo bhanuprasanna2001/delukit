@@ -1,5 +1,5 @@
 import threading
-from datetime import timedelta
+from datetime import date, timedelta
 
 from dotenv import load_dotenv
 
@@ -21,6 +21,7 @@ from delukit.core.config.weather import (
 )
 from delukit.core.log import LOG_FILE
 from delukit.sources import calendar, entsoe, smard, weather
+from delukit.sources.observations import bootstrap_legacy
 
 # energy_charts is implemented (sources/energy_charts.py, standalone-runnable)
 # but not synced until downstream needs it; enable with:
@@ -36,11 +37,11 @@ SOURCES = {
 load_dotenv()
 
 
-def show_header(end):
+def show_header(start, end):
     rows = [
         ("Sources", ", ".join(SOURCES)),
         ("Area", "DE-LU"),
-        ("Window", f"{START} -> {end}"),
+        ("Window", f"{start} -> {end}"),
         ("Refresh", f"last {REFRESH_DAYS} days re-fetched"),
         ("Destination", f"{BASE_DIR}/<day>/<source>/<category>/data.*"),
         ("Log", LOG_FILE),
@@ -76,20 +77,27 @@ def show_summary(counts):
     print(bar)
 
 
-def main():
+def main(*, start: date | None = None):
     log = setup_logging()
     end = end_date()
+    start = start or max(START, end - timedelta(days=REFRESH_DAYS + 1))
+    if start < START or start > end:
+        raise ValueError(f"source start must be between {START} and {end}")
+    legacy = bootstrap_legacy(BASE_DIR)
+    if legacy:
+        log.info("stamped %d legacy raw files with today's observed time", legacy)
 
-    show_header(end)
+    show_header(start, end)
 
-    days = (end - START).days + 1
+    days = (end - start).days + 1
     cal_end = max(end, end + timedelta(days=CALENDAR_AHEAD_DAYS - 1))
-    cal_days = (cal_end - START).days + 1
+    cal_days = (cal_end - start).days + 1
     totals = {
         source: len(categories) * (cal_days if source == "calendar" else days)
         for source, (_, categories) in SOURCES.items()
     }
     counts = {}
+    errors = {}
 
     with sync_progress(totals) as advance:
 
@@ -101,9 +109,12 @@ def main():
                 log.info("%s %s %s: revised upstream", source, day, category)
 
         def run(source, module):
-            counts[source] = module.sync(
-                START, end, on_each=lambda c, d, s: track(source, c, d, s)
-            )
+            try:
+                counts[source] = module.sync(
+                    start, end, on_each=lambda c, d, s: track(source, c, d, s)
+                )
+            except Exception as exc:  # noqa: BLE001 - carry worker failure to caller
+                errors[source] = exc
 
         # Different hosts, independent limits: run both pools at once.
         threads = [
@@ -115,7 +126,15 @@ def main():
         for thread in threads:
             thread.join()
 
+    if errors:
+        names = ", ".join(sorted(errors))
+        raise RuntimeError(f"source sync failed: {names}") from next(
+            iter(errors.values())
+        )
     show_summary(counts)
+    failed = {name: c["failed"] for name, c in counts.items() if c["failed"]}
+    if failed:
+        raise RuntimeError(f"source fetch failures: {failed}")
     for source in SOURCES:
         c = counts[source]
         log.info(
@@ -129,5 +148,18 @@ def main():
         )
 
 
+def cli() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Refresh provider observations.")
+    parser.add_argument(
+        "--since",
+        type=date.fromisoformat,
+        help="Berlin first day for a deliberate historical repair (default: recent window)",
+    )
+    args = parser.parse_args()
+    main(start=args.since)
+
+
 if __name__ == "__main__":
-    main()
+    cli()
