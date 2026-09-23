@@ -94,7 +94,7 @@ export function Download({
     const h = Math.max(1, Number.parseInt(horizon, 10) || 1);
     const rows = dayCount > 0 ? dayCount * h * STEPS_PER_DAY : 0;
     const overlapping = h > 1;
-    const runLabel = gate === "0530" ? "05:30 UTC" : "11:30 Europe/Berlin";
+    const runLabel = gate === "0530" ? "05:30 Europe/Berlin" : "11:30 Europe/Berlin";
     const fileName =
       start && end
         ? `delu_${target}_${start}_${end}_${gate}_${kind}_h${h}d.${format}`
@@ -346,7 +346,7 @@ export function Download({
               }
             >
               <Select id="dl-gate" name="gate" value={gate} onChange={(e) => setGate(e.target.value)}>
-                <option value="0530">05:30 UTC</option>
+                <option value="0530">05:30 Europe/Berlin</option>
                 <option value="1130">11:30 Europe/Berlin</option>
               </Select>
             </Field>

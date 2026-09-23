@@ -655,7 +655,7 @@ export function ForecastChart({
                     ) : null}
                     {hvWidth !== null ? (
                       <div className="flex items-baseline justify-between gap-6">
-                        <span>90% interval width</span>
+                        <span>80% interval width</span>
                         <span>
                           {fmt(hvWidth)} {unit}
                         </span>

@@ -4,6 +4,10 @@ Why these: account enumeration, quota reset on refresh, and export/forecast
 path handling are the real incidents; trivial getters are not tested.
 """
 
+import io
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
 import pandas as pd
 import pytest
 
@@ -185,6 +189,91 @@ def test_export_frame_validation_and_file(tmp_dirs):
             1,
             "xml",
         )
+
+
+@pytest.mark.parametrize("gate", ["0530", "1130"])
+@pytest.mark.parametrize(
+    (
+        "origin_day",
+        "delivery_day",
+        "expected_rows",
+        "first_target_time",
+        "last_target_time",
+    ),
+    [
+        (
+            "2026-01-05",
+            "2026-01-06",
+            96,
+            "2026-01-06T00:00:00+01:00",
+            "2026-01-06T23:45:00+01:00",
+        ),
+        (
+            "2026-03-28",
+            "2026-03-29",
+            92,
+            "2026-03-29T00:00:00+01:00",
+            "2026-03-29T23:45:00+02:00",
+        ),
+        (
+            "2026-10-24",
+            "2026-10-25",
+            100,
+            "2026-10-25T00:00:00+02:00",
+            "2026-10-25T23:45:00+01:00",
+        ),
+    ],
+)
+def test_export_delivers_complete_local_day(
+    tmp_dirs,
+    monkeypatch,
+    gate,
+    origin_day,
+    delivery_day,
+    expected_rows,
+    first_target_time,
+    last_target_time,
+):
+    berlin = ZoneInfo("Europe/Berlin")
+    start = datetime.combine(date.fromisoformat(delivery_day), time.min, berlin)
+    end = datetime.combine(
+        date.fromisoformat(delivery_day) + timedelta(days=1), time.min, berlin
+    )
+    index = pd.date_range(start, end, freq="15min", inclusive="left").tz_convert("UTC")
+    outdir = tmp_dirs["forecasts"] / origin_day / f"{gate}_d1"
+    outdir.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "quantile_P10": range(len(index)),
+            "quantile_P50": range(len(index)),
+            "quantile_P90": range(len(index)),
+            "load_actual_mw": range(len(index)),
+        },
+        index=index,
+    ).to_parquet(outdir / "load_actual_mw__xgboost.parquet")
+
+    client = _verified_client(tmp_dirs, monkeypatch)
+    response = client.get(
+        "/api/export",
+        params={
+            "start": origin_day,
+            "end": origin_day,
+            "target": "load_actual_mw",
+            "gate": gate,
+            "kind": "point",
+            "tz": "Europe/Berlin",
+            "horizon_days": 1,
+            "format": "csv",
+        },
+    )
+    assert response.status_code == 200
+    exported = pd.read_csv(io.BytesIO(response.content))
+    assert len(exported) == expected_rows
+    assert exported["origin_date"].unique().tolist() == [origin_day]
+    assert exported["origin_time"].unique().tolist() == [f"{gate[:2]}:{gate[2:]}"]
+    assert exported["target_time"].iloc[0] == first_target_time
+    assert exported["target_time"].iloc[-1] == last_target_time
+    assert exported["p50"].iloc[-1] == expected_rows - 1
 
 
 def test_download_files_lists_newest_days(tmp_dirs):

@@ -1,6 +1,6 @@
 import io
 import os
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -189,8 +189,13 @@ def export_frame(
         if target not in frame.columns:
             continue
         origin = _origin_moment(day, gate)
+        delivery_day = origin.date() + timedelta(days=1)
+        delivery_start = datetime.combine(delivery_day, time.min, origin.tzinfo)
+        delivery_end = datetime.combine(
+            delivery_day + timedelta(days=horizon_days), time.min, origin.tzinfo
+        )
         hours = (frame.index - origin).total_seconds() / 3600.0
-        keep = (hours >= 0) & (hours <= horizon_days * 24)
+        keep = (frame.index >= delivery_start) & (frame.index < delivery_end)
         sub = frame[keep]
         if sub.empty:
             continue
