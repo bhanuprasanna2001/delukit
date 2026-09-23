@@ -23,6 +23,10 @@ interface Sel {
   kind: "point" | "probabilistic";
 }
 
+type ForecastResult =
+  | { key: string; kind: "ok"; data: ForecastData }
+  | { key: string; kind: "error"; message: string };
+
 const GATE_INFO =
   "Two model runs a day. 05:30 runs before the morning auctions. 11:30 sees the EXAA results and the ENTSO-E day-ahead load forecast, so its day-ahead read is cleaner.";
 
@@ -38,12 +42,11 @@ export function Forecasts() {
     target: "",
     kind: "probabilistic",
   }));
-  const [data, setData] = useState<ForecastData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [result, setResult] = useState<ForecastResult | null>(null);
+  const [optionsError, setOptionsError] = useState("");
 
   useEffect(() => {
-    getOptions().then(setOpts).catch((e: Error) => setError(e.message));
+    getOptions().then(setOpts).catch((e: Error) => setOptionsError(e.message));
   }, []);
 
   const eff = useMemo((): Sel | null => {
@@ -63,25 +66,32 @@ export function Forecasts() {
     return { date, gate, span: sel.span, target, kind: sel.kind };
   }, [opts, sel]);
 
+  const requestKey = eff ? JSON.stringify(eff) : null;
+  const current = result?.key === requestKey ? result : null;
+  const loading = !!eff && current === null;
+  const data = current?.kind === "ok" ? current.data : null;
+  const error = optionsError || (current?.kind === "error" ? current.message : "");
+
   useEffect(() => {
-    if (!eff) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError("");
+    if (!eff) return;
+    let active = true;
+    const key = JSON.stringify(eff);
     publicForecast(eff)
       .then((d) => {
-        setData(d);
-        setLoading(false);
+        if (active) setResult({ key, kind: "ok", data: d });
       })
       .catch((e: Error) => {
-        setError(e.message);
-        setLoading(false);
+        if (active) setResult({ key, kind: "error", message: e.message });
       });
-  }, [eff?.date, eff?.gate, eff?.span, eff?.target, eff?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      active = false;
+    };
+  }, [eff]);
 
   if (!opts) {
+    if (optionsError) {
+      return <p className="text-sm text-red-700">Could not load forecasts: {optionsError}</p>;
+    }
     return (
       <div className="grid gap-3">
         <div className="h-10 w-64 animate-pulse rounded-md bg-line" />
@@ -268,9 +278,9 @@ export function Forecasts() {
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col py-3">
-        {loading || !data ? (
+        {loading ? (
           <div className="min-h-0 flex-1 animate-pulse rounded-xl bg-line" />
-        ) : (
+        ) : data ? (
           <div className="flex min-h-[380px] flex-1 flex-col overflow-hidden rounded-xl border border-line lg:min-h-0">
             <ForecastChart
               timestamps={data.timestamps}
@@ -283,6 +293,8 @@ export function Forecasts() {
               target={eff?.target ?? data.meta.target}
             />
           </div>
+        ) : (
+          <div className="min-h-0 flex-1" />
         )}
       </div>
 

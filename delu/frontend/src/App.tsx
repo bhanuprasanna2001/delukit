@@ -1,5 +1,5 @@
 import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyReveal } from "./components/KeyReveal";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -26,7 +26,10 @@ export type View =
   | "contact"
   | "attribution";
 
+const verifyTokenFromUrl = new URLSearchParams(window.location.search).get("verify") ?? "";
+
 function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
+  const attempted = useRef<string | null>(null);
   const [state, setState] = useState<
     | { status: "pending" }
     | { status: "ok"; detail: string; apiKey?: string }
@@ -34,6 +37,8 @@ function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
   >({ status: "pending" });
 
   useEffect(() => {
+    if (attempted.current === token) return;
+    attempted.current = token;
     verifyEmail(token)
       .then((res) => {
         setState({ status: "ok", detail: res.detail, apiKey: res.api_key });
@@ -64,9 +69,8 @@ function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>("forecasts");
+  const [view, setView] = useState<View>(verifyTokenFromUrl ? "verify" : "forecasts");
   const [me, setMe] = useState<Me | null | undefined>(undefined);
-  const [verifyToken, setVerifyToken] = useState("");
   const [signedUp, setSignedUp] = useState("");
 
   async function refreshMe() {
@@ -78,14 +82,18 @@ export default function App() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("verify");
     window.history.replaceState({}, "", window.location.pathname);
-    if (token) {
-      setVerifyToken(token);
-      setView("verify");
-    }
-    refreshMe();
+    let active = true;
+    getMe()
+      .then((account) => {
+        if (active) setMe(account);
+      })
+      .catch(() => {
+        if (active) setMe(null);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function signOut() {
@@ -244,7 +252,7 @@ export default function App() {
 
           {view === "verify"
             ? center(
-                <VerifyPanel token={verifyToken} onDone={refreshMe} />,
+                <VerifyPanel token={verifyTokenFromUrl} onDone={refreshMe} />,
               )
             : null}
 

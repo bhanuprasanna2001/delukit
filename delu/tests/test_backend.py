@@ -107,7 +107,9 @@ def test_keys_minute_quota_and_refresh_carries_day(tmp_dirs):
 # --- forecasts ---
 def _write_forecast(fdir, target, day="2026-01-06", model="xgboost", n=96):
     fdir.mkdir(parents=True, exist_ok=True)
-    idx = pd.date_range(f"{day} 00:00", periods=n, freq="15min", tz="UTC")
+    idx = pd.date_range(
+        f"{day} 00:00", periods=n, freq="15min", tz="Europe/Berlin"
+    ).tz_convert("UTC")
     pd.DataFrame(
         {
             "quantile_P10": [1.0] * n,
@@ -188,6 +190,46 @@ def test_export_frame_validation_and_file(tmp_dirs):
             "UTC",
             1,
             "xml",
+        )
+
+
+def test_export_rejects_missing_origin_and_incomplete_delivery(tmp_dirs):
+    from backend import forecasts as F
+
+    path = tmp_dirs["forecasts"] / "2026-01-05" / "1130_d1"
+    _write_forecast(path, "load_actual_mw")
+    with pytest.raises(F.Missing, match="2026-01-06"):
+        F.export_frame(
+            "2026-01-05",
+            "2026-01-06",
+            "load_actual_mw",
+            "1130",
+            "point",
+            "Europe/Berlin",
+            1,
+        )
+    with pytest.raises(F.Missing, match="d10"):
+        F.export_frame(
+            "2026-01-05",
+            "2026-01-05",
+            "load_actual_mw",
+            "1130",
+            "point",
+            "Europe/Berlin",
+            2,
+        )
+    file = path / "load_actual_mw__xgboost.parquet"
+    frame = pd.read_parquet(file).iloc[1:]
+    frame.to_parquet(file)
+    with pytest.raises(F.Missing, match="Incomplete 1-day"):
+        F.export_frame(
+            "2026-01-05",
+            "2026-01-05",
+            "load_actual_mw",
+            "1130",
+            "point",
+            "Europe/Berlin",
+            1,
         )
 
 

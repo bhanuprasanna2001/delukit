@@ -147,8 +147,15 @@ def api_key_user(
     response.headers["X-RateLimit-Minute"] = str(keys.MIN_LIMIT)
     response.headers["X-RateLimit-Day"] = str(keys.DAY_LIMIT)
     if not ok:
-        response.headers["Retry-After"] = str(retry)
-        raise HTTPException(status_code=429, detail="Rate limit reached. Slow down.")
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit reached. Slow down.",
+            headers={
+                "Retry-After": str(retry),
+                "X-RateLimit-Minute": str(keys.MIN_LIMIT),
+                "X-RateLimit-Day": str(keys.DAY_LIMIT),
+            },
+        )
     keys.touch(found["id"])
     return found
 

@@ -167,8 +167,8 @@ def export_frame(
     opts = options()
     if target not in opts["targets"]:
         raise ValueError("Unknown forecast quantity.")
-    days = [d for d in opts["dates"] if start <= d <= end]
-    if not days:
+    days = [(s + timedelta(days=i)).isoformat() for i in range((e - s).days + 1)]
+    if not any(day in opts["dates"] for day in days):
         raise Missing("No forecasts in that date range.")
 
     zone = ZoneInfo(tz)
@@ -177,17 +177,20 @@ def export_frame(
     parts = []
     for day in days:
         path = None
-        for sp in (span, "d10" if span == "d1" else "d1"):
+        candidates = ("d1", "d10") if span == "d1" else ("d10",)
+        for sp in candidates:
             outdir = FORECASTS_DIR / day / f"{gate}_{sp}"
             files = list(outdir.glob(f"{target}__*.parquet")) if outdir.is_dir() else []
             if files:
                 path = max(files, key=lambda p: p.stat().st_mtime)
                 break
         if path is None:
-            continue
+            raise Missing(f"No {span} forecast for {target} on {day} at {gate}.")
         frame = pd.read_parquet(path)
         if target not in frame.columns:
-            continue
+            raise Missing(f"{target} is not in the {day} forecast file.")
+        if not all(EXPORT_COLS[column] in frame.columns for column in cols):
+            raise Missing(f"Requested quantiles are missing for {target} on {day}.")
         origin = _origin_moment(day, gate)
         delivery_day = origin.date() + timedelta(days=1)
         delivery_start = datetime.combine(delivery_day, time.min, origin.tzinfo)
@@ -197,8 +200,15 @@ def export_frame(
         hours = (frame.index - origin).total_seconds() / 3600.0
         keep = (frame.index >= delivery_start) & (frame.index < delivery_end)
         sub = frame[keep]
-        if sub.empty:
-            continue
+        expected = pd.date_range(
+            delivery_start, delivery_end, freq="15min", inclusive="left"
+        ).tz_convert("UTC")
+        if not sub.index.equals(expected):
+            raise Missing(
+                f"Incomplete {horizon_days}-day forecast for {target} on {day} at {gate}."
+            )
+        if sub[[EXPORT_COLS[c] for c in cols]].isna().any().any():
+            raise Missing(f"Missing forecast values for {target} on {day} at {gate}.")
         data: dict[str, list] = {
             "origin_date": [day] * len(sub),
             "origin_time": [f"{gate[:2]}:{gate[2:]}"] * len(sub),
