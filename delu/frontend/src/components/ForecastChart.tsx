@@ -122,7 +122,6 @@ export function ForecastChart({
     const x = (i: number) => PAD.l + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
     const y = (v: number) => PAD.t + (1 - (v - lo) / (hi - lo)) * ih;
 
-    // Segmented path: restarts after every null so gaps never bridge.
     const segPath = (series: (number | null)[]) => {
       let d = "";
       let pen = false;
@@ -138,7 +137,6 @@ export function ForecastChart({
       return d;
     };
 
-    // Band only where P10 and P90 both exist, split into contiguous runs.
     const bandPath = () => {
       if (!p10 || !p90) return "";
       let d = "";
@@ -181,8 +179,6 @@ export function ForecastChart({
 
     const yticks = niceTicks(lo, hi);
 
-    // Group sample indices by Berlin calendar day; drives labels,
-    // separators and weekend shading for long spans.
     const days: { start: number; end: number; key: string; weekend: boolean }[] = [];
     let info = berlinInfo(timestamps[0]);
     let cur = { start: 0, end: 0, key: info.dateKey, weekend: info.weekday >= 6 };

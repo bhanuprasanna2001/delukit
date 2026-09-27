@@ -1,4 +1,5 @@
 import io
+import json
 import os
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -12,8 +13,6 @@ ACTUALS_DIR = Path(os.getenv("DELU_ACTUALS", "data/clean"))
 GATES = ("0530", "1130")
 SPANS = ("d1", "d10")
 
-# How much realised history to show alongside a forecast: one day for
-# day-ahead, two days for the 10-day span.
 LOOKBACK = {"d1": timedelta(days=1), "d10": timedelta(days=2)}
 
 EXPORT_TIMEZONES = ("Europe/Berlin", "UTC")
@@ -28,8 +27,6 @@ SMARD_TARGETS = (
     "gen_actual_wind_onshore_mwh",
     "gen_actual_photovoltaics_mwh",
 )
-# Mirrors delukit.core.config.products.GEN_TOTAL_COLUMNS: gen_actual_total_mwh
-# is the sum of all SMARD generation types.
 GEN_TOTAL_COLUMNS = (
     "gen_actual_biomass_mwh",
     "gen_actual_hydropower_mwh",
@@ -50,14 +47,47 @@ class Missing(Exception):
     pass
 
 
+def _datetime_index(index: pd.Index) -> pd.DatetimeIndex:
+    if not isinstance(index, pd.DatetimeIndex):
+        raise ValueError("Forecast data must use a timestamp index.")
+    return index
+
+
+def _series_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    values = frame[column]
+    if not isinstance(values, pd.Series):
+        raise ValueError(f"Expected one column named {column}.")
+    return values
+
+
+def _published(day: str, gate: str, span: str) -> dict[str, Path] | None:
+    day_dir = FORECASTS_DIR / day
+    manifest = day_dir / f"{gate}.json"
+    if not manifest.is_file():
+        return None
+    body = json.loads(manifest.read_text())
+    if body["schema"] != 1 or body["day"] != day or body["gate"] != gate:
+        raise Missing(f"Invalid publication for {day} at {gate}.")
+    return {
+        item["target"]: day_dir / item["path"]
+        for item in body["products"]
+        if item["span"] == span
+    }
+
+
+def _run_present(day_dir: Path, gate: str, span: str) -> bool:
+    return (day_dir / f"{gate}.json").is_file() or (day_dir / f"{gate}_{span}").is_dir()
+
+
 def _actual_series(target: str) -> pd.Series | None:
-    """Realised values for a target, quarter-hourly, UTC-indexed."""
     if not ACTUALS_DIR.is_dir():
         return None
     if target in ENTSOE_TARGETS:
-        return pd.read_parquet(ACTUALS_DIR / "entsoe.parquet", columns=[target])[target]
+        frame = pd.read_parquet(ACTUALS_DIR / "entsoe.parquet", columns=[target])
+        return _series_column(frame, target)
     if target in SMARD_TARGETS:
-        return pd.read_parquet(ACTUALS_DIR / "smard.parquet", columns=[target])[target]
+        frame = pd.read_parquet(ACTUALS_DIR / "smard.parquet", columns=[target])
+        return _series_column(frame, target)
     if target == "gen_actual_total_mwh":
         frame = pd.read_parquet(
             ACTUALS_DIR / "smard.parquet", columns=list(GEN_TOTAL_COLUMNS)
@@ -69,14 +99,25 @@ def _actual_series(target: str) -> pd.Series | None:
 def options() -> dict:
     if not FORECASTS_DIR.is_dir():
         return {"dates": [], "gates": list(GATES), "spans": list(SPANS), "targets": []}
-    dates = sorted(p.name for p in FORECASTS_DIR.iterdir() if p.is_dir())
+    dates = sorted(
+        p.name
+        for p in FORECASTS_DIR.iterdir()
+        if p.is_dir()
+        and len(p.name) == 10
+        and p.name[4:5] == "-"
+        and any(_run_present(p, gate, span) for gate in GATES for span in SPANS)
+    )
     targets: set[str] = set()
     runs: dict[str, dict[str, list[str]]] = {}
     for day in dates:
         for span in SPANS:
-            gates = [g for g in GATES if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()]
+            gates = [g for g in GATES if _run_present(FORECASTS_DIR / day, g, span)]
             if gates:
                 runs.setdefault(day, {})[span] = gates
+                for gate in gates:
+                    published = _published(day, gate, span)
+                    if published is not None:
+                        targets.update(published)
         for path in (FORECASTS_DIR / day).glob("*/*__*.parquet"):
             target, sep, _ = path.stem.rpartition("__")
             if sep and target:
@@ -91,6 +132,12 @@ def options() -> dict:
 
 
 def _newest(day: str, gate: str, span: str, target: str) -> Path:
+    published = _published(day, gate, span)
+    if published is not None:
+        path = published.get(target)
+        if path is None or not path.is_file():
+            raise Missing(f"No {span} forecast for {target} on {day} at {gate}.")
+        return path
     outdir = FORECASTS_DIR / day / f"{gate}_{span}"
     paths = list(outdir.glob(f"{target}__*.parquet"))
     if not paths:
@@ -105,7 +152,7 @@ def resolve(day: str | None, gate: str | None, span: str, target: str):
     day = day or opts["dates"][-1]
     if span not in SPANS:
         raise Missing(f"Span must be one of {SPANS}.")
-    present = [g for g in GATES if (FORECASTS_DIR / day / f"{g}_{span}").is_dir()]
+    present = [g for g in GATES if _run_present(FORECASTS_DIR / day, g, span)]
     if not present:
         raise Missing(f"No {span} forecast for {day}.")
     gate = gate or ("1130" if "1130" in present else present[-1])
@@ -115,14 +162,23 @@ def resolve(day: str | None, gate: str | None, span: str, target: str):
 
 
 def download_files(days: int) -> list[tuple[Path, str]]:
-    """Parquet files from the newest `days` run days, as (path, archive name)."""
     if not FORECASTS_DIR.is_dir():
         return []
-    dates = sorted(p.name for p in FORECASTS_DIR.iterdir() if p.is_dir())[-days:]
+    dates = options()["dates"][-days:]
     out: list[tuple[Path, str]] = []
     for day in dates:
+        for gate in GATES:
+            for span in SPANS:
+                published = _published(day, gate, span)
+                if published is not None:
+                    for path in published.values():
+                        out.append((path, f"{day}/{gate}_{span}/{path.name}"))
         for sub in (FORECASTS_DIR / day).iterdir():
-            if sub.is_dir():
+            if (
+                sub.is_dir()
+                and sub.name in {f"{g}_{s}" for g in GATES for s in SPANS}
+                and not (FORECASTS_DIR / day / f"{sub.name[:4]}.json").exists()
+            ):
                 for f in sub.glob("*.parquet"):
                     out.append((f, f"{day}/{sub.name}/{f.name}"))
     return out
@@ -147,7 +203,6 @@ def export_frame(
     tz: str,
     horizon_days: int,
 ) -> pd.DataFrame:
-    """One tidy table of forecast runs: one overlapping series per origin day."""
     if gate not in GATES:
         raise ValueError(f"Run is one of {GATES}.")
     if kind not in EXPORT_KINDS:
@@ -178,35 +233,38 @@ def export_frame(
     for day in days:
         path = None
         for sp in (span, "d10" if span == "d1" else "d1"):
-            outdir = FORECASTS_DIR / day / f"{gate}_{sp}"
-            files = list(outdir.glob(f"{target}__*.parquet")) if outdir.is_dir() else []
-            if files:
-                path = max(files, key=lambda p: p.stat().st_mtime)
+            try:
+                path = _newest(day, gate, sp, target)
                 break
+            except Missing:
+                continue
         if path is None:
             continue
         frame = pd.read_parquet(path)
         if target not in frame.columns:
             continue
+        index = _datetime_index(frame.index)
         origin = _origin_moment(day, gate)
         delivery_day = origin.date() + timedelta(days=1)
         delivery_start = datetime.combine(delivery_day, time.min, origin.tzinfo)
         delivery_end = datetime.combine(
             delivery_day + timedelta(days=horizon_days), time.min, origin.tzinfo
         )
-        hours = (frame.index - origin).total_seconds() / 3600.0
-        keep = (frame.index >= delivery_start) & (frame.index < delivery_end)
-        sub = frame[keep]
+        hours = (index - origin).total_seconds() / 3600.0
+        keep = (index >= delivery_start) & (index < delivery_end)
+        sub = frame.loc[keep]
         if sub.empty:
             continue
+        sub_index = _datetime_index(sub.index)
         data: dict[str, list] = {
             "origin_date": [day] * len(sub),
             "origin_time": [f"{gate[:2]}:{gate[2:]}"] * len(sub),
-            "target_time": [t.isoformat() for t in sub.index.tz_convert(zone)],
+            "target_time": [t.isoformat() for t in sub_index.tz_convert(zone)],
             "horizon_in_hours": [round(float(v), 2) for v in hours[keep]],
         }
         for c in cols:
-            data[c] = [None if pd.isna(v) else float(v) for v in sub[EXPORT_COLS[c]]]
+            values = _series_column(sub, EXPORT_COLS[c])
+            data[c] = [None if pd.isna(v) else float(v) for v in values]
         parts.append(pd.DataFrame(data))
     if not parts:
         raise Missing("No forecasts in that date range.")
@@ -246,22 +304,26 @@ def load(day: str, gate: str, span: str, target: str, kind: str) -> dict:
     frame = pd.read_parquet(path)
     if target not in frame.columns:
         raise Missing(f"{target} is not in this forecast file.")
+    if frame.empty:
+        raise Missing(f"{target} forecast is empty for {day} at {gate}.")
+    forecast_index = _datetime_index(frame.index)
     model = path.stem.rpartition("__")[2]
 
-    start = frame.index.min()
-    end = frame.index.max()
+    start = forecast_index.min()
+    end = forecast_index.max()
+    if not isinstance(start, pd.Timestamp) or not isinstance(end, pd.Timestamp):
+        raise Missing(f"{target} forecast has no valid timestamps for {day} at {gate}.")
 
-    # Realised history: LOOKBACK before the gate, plus anything published
-    # inside the horizon since the run (drawn over the forecast).
     actual = _actual_series(target)
     if actual is not None:
-        actual = actual[
-            (actual.index >= start - LOOKBACK[span]) & (actual.index <= end)
+        actual_index = _datetime_index(actual.index)
+        actual = actual.loc[
+            (actual_index >= start - LOOKBACK[span]) & (actual_index <= end)
         ].dropna()
-        idx = frame.index.union(actual.index)
+        idx = forecast_index.union(_datetime_index(actual.index))
         frame = frame.reindex(idx)
     else:
-        idx = frame.index
+        idx = forecast_index
         actual = pd.Series(dtype="float64").reindex(idx)
 
     def qt(c):

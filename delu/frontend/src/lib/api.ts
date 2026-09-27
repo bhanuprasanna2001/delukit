@@ -157,9 +157,6 @@ export function unitFor(target: string): string {
   return "MW";
 }
 
-// One accent per energy quantity. Hues follow the subject: sea blue for
-// offshore wind, coastal teal for onshore, sun amber for solar, money rose
-// for day-ahead prices. All tuned to sit on the night plot at equal weight.
 export const SERIES_ACCENTS: Record<string, string> = {
   load_actual_mw: "#4ade80",
   gen_actual_total_mwh: "#c084fc",

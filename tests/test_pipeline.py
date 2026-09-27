@@ -1,19 +1,42 @@
-"""Gate math, fallback chain, bands, dagster guards.
-
-Why these: wrong gate/horizon leaks future lags; fallback returning nothing
-is an outage; multi-day bands without bucketing silently re-score d1 skill.
-"""
-
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
 
+def test_sync_fails_when_a_provider_reports_failed_fetches(monkeypatch):
+    import logging
+    from contextlib import nullcontext
+
+    from delukit.sources import sync
+
+    class Provider:
+        @staticmethod
+        def sync(*args, **kwargs):
+            return {
+                "fetched": 0,
+                "updated": 0,
+                "unchanged": 0,
+                "no_data": 0,
+                "failed": 1,
+            }
+
+    monkeypatch.setattr(sync, "SOURCES", {"provider": (Provider, ["series"])})
+    monkeypatch.setattr(
+        sync, "sync_progress", lambda totals: nullcontext(lambda *a: None)
+    )
+    monkeypatch.setattr(sync, "setup_logging", lambda: logging.getLogger("test-sync"))
+    monkeypatch.setattr(sync, "show_header", lambda end: None)
+    monkeypatch.setattr(sync, "show_summary", lambda counts: None)
+
+    with pytest.raises(RuntimeError, match="source sync failed"):
+        sync.main()
+
+
 def test_gate_datetime_is_berlin_gate_in_utc():
     import pandas as pd
 
-    from delukit.forecast import gate_datetime
+    from delukit.models.forecast import gate_datetime
 
     got = gate_datetime(date(2026, 1, 5), "0530")
     want = pd.Timestamp(
@@ -23,7 +46,7 @@ def test_gate_datetime_is_berlin_gate_in_utc():
 
 
 def test_infer_gate_boundaries():
-    from delukit.forecast import infer_gate
+    from delukit.models.forecast import infer_gate
 
     berlin = ZoneInfo("Europe/Berlin")
     assert infer_gate(datetime(2026, 1, 5, 5, 29, tzinfo=berlin)) == (
@@ -49,8 +72,8 @@ def test_slice_span_cuts_d1_vs_d10():
     from openstef_core.datasets import ForecastDataset
 
     from delukit.core.clean import UTC
-    from delukit.dataset import QUARTER
-    from delukit.forecast import slice_span
+    from delukit.data.dataset import QUARTER
+    from delukit.models.forecast import slice_span
 
     idx = pd.date_range("2026-01-05 23:00", periods=96 * 11, freq="15min", tz=UTC)
     fc = ForecastDataset(
@@ -66,15 +89,15 @@ def test_slice_span_cuts_d1_vs_d10():
 
 def test_workflow_config_horizons_and_excludes():
     from delukit.core.config.products import HORIZONS
-    from delukit.forecast import workflow_config
+    from delukit.models.forecast import workflow_config
 
     cfg = workflow_config("load_actual_mw", "0530", "d1", use_tuned=False)
     assert cfg.target_column == "load_actual_mw"
     assert cfg.horizons == HORIZONS[("0530", "d1")]
     excluded = cfg.selected_features.exclude
-    assert "load_actual_mw" not in excluded  # target itself always kept
-    assert "load_actual_mwh" in excluded  # sister-source actuals never features
-    assert "price_exaa_eur_mwh" in excluded  # 0530 sees no published curves
+    assert "load_actual_mw" not in excluded
+    assert "load_actual_mwh" in excluded
+    assert "price_exaa_eur_mwh" in excluded
     day_cfg = workflow_config("load_actual_mw", "1130", "d1", use_tuned=False)
     assert "price_exaa_eur_mwh" not in day_cfg.selected_features.exclude
 
@@ -82,7 +105,7 @@ def test_workflow_config_horizons_and_excludes():
 def test_predict_with_fallback_degrades_and_reports(monkeypatch):
     from openstef_core.exceptions import InsufficientlyCompleteError, PredictError
 
-    import delukit.forecast as F
+    import delukit.models.forecast as F
 
     calls = []
 
@@ -103,13 +126,48 @@ def test_predict_with_fallback_degrades_and_reports(monkeypatch):
 
 
 def test_predict_with_fallback_uses_first_success(monkeypatch):
-    import delukit.forecast as F
+    import delukit.models.forecast as F
 
     sentinel = object()
     monkeypatch.setattr(F, "fit_product", lambda *a, **k: "wf")
     monkeypatch.setattr(F, "predict_product", lambda *a, **k: sentinel)
     out, model = F.predict_with_fallback("t", "0530", "d1", date(2026, 1, 5))
     assert out is sentinel and model == "xgboost"
+
+
+def test_missing_registry_model_stays_unregistered(monkeypatch):
+    from openstef_core.exceptions import ModelNotFoundError
+
+    import delukit.models.forecast as F
+
+    sentinel = object()
+    fit_kwargs = []
+    monkeypatch.setattr(F, "create_workflow", lambda *a, **k: "registry")
+
+    def fake_predict(workflow, *args, **kwargs):
+        if workflow == "registry":
+            raise ModelNotFoundError(model_id="missing")
+        return sentinel
+
+    def fake_fit(*args, **kwargs):
+        fit_kwargs.append(kwargs)
+        return "local"
+
+    monkeypatch.setattr(F, "predict_product", fake_predict)
+    monkeypatch.setattr(F, "fit_product", fake_fit)
+
+    out, model = F.predict_with_fallback(
+        "load_actual_mw", "0530", "d1", date(2026, 1, 5), registry=True
+    )
+    assert out is sentinel
+    assert model == "xgboost_unregistered"
+    assert fit_kwargs == [
+        {
+            "forecast_origin": F.gate_datetime(date(2026, 1, 5), "0530"),
+            "model": "xgboost",
+            "registry": False,
+        }
+    ]
 
 
 def test_fitting_and_prediction_share_forecast_origin(monkeypatch):
@@ -120,9 +178,9 @@ def test_fitting_and_prediction_share_forecast_origin(monkeypatch):
         VersionedTimeSeriesDataset,
     )
 
-    import delukit.forecast as F
+    import delukit.models.forecast as F
     from delukit.core.clean import UTC, quarter_grid
-    from delukit.dataset import QUARTER
+    from delukit.data.dataset import QUARTER
 
     day = date(2026, 1, 5)
     origin = F.gate_datetime(day, "0530")
@@ -180,8 +238,8 @@ def test_fit_product_anchors_training_window_to_forecast_origin(monkeypatch):
     import pandas as pd
     from openstef_core.datasets import TimeSeriesDataset, VersionedTimeSeriesDataset
 
-    import delukit.forecast as F
-    from delukit.dataset import QUARTER
+    import delukit.models.forecast as F
+    from delukit.data.dataset import QUARTER
 
     origin = F.gate_datetime(date(2026, 1, 5), "0530")
     index = pd.DatetimeIndex(
@@ -231,9 +289,9 @@ def test_backtest_split_target_and_bands():
     import pandas as pd
     from openstef_core.datasets import TimeSeriesDataset, VersionedTimeSeriesDataset
 
-    from delukit.backtest import split_bands, split_target
     from delukit.core.clean import BERLIN, UTC
-    from delukit.dataset import QUARTER
+    from delukit.data.dataset import QUARTER
+    from delukit.evaluation.backtest import split_bands, split_target
 
     idx = pd.date_range("2026-01-06 00:00", periods=96, freq="15min", tz=UTC)
     avail = pd.Series([pd.Timestamp("2026-01-05 04:00", tz=UTC)] * len(idx), index=idx)
@@ -253,7 +311,6 @@ def test_backtest_split_target_and_bands():
     assert truth.feature_names == ["load_actual_mw"]
     assert "load_actual_mw" not in preds.feature_names
 
-    # bands: exactly the Berlin day 2026-01-06 -> d1 only
     from delukit.core.clean import quarter_grid
 
     gate_ts = pd.Timestamp(datetime(2026, 1, 5, 5, 30, tzinfo=BERLIN)).tz_convert(UTC)
@@ -265,41 +322,13 @@ def test_backtest_split_target_and_bands():
 
 
 def test_dagster_partition_and_expected_rows():
-    from delukit.dagster_app.definitions import _expected_rows, _partition_day_gate
+    from delukit.dagster_app.definitions import _partition_day_gate
+    from delukit.ops.publication import expected_index
 
     assert _partition_day_gate("2026-01-05|0530") == (date(2026, 1, 5), "0530")
-    assert _expected_rows(date(2026, 1, 5), "d1") == 96
-    assert _expected_rows(date(2026, 1, 5), "d10") == 960
-    # DST spring-forward D+1 has 92 quarters
-    assert _expected_rows(date(2026, 3, 28), "d1") == 92
-
-
-def test_dagster_check_forecast_files(tmp_dirs):
-    import pandas as pd
-
-    from delukit.core.clean import UTC
-    from delukit.core.config.products import TARGETS
-    from delukit.dagster_app.definitions import _check_forecast_files
-
-    day = date(2026, 1, 5)
-    fdir = tmp_dirs["forecasts"] / "2026-01-05" / "0530_d1"
-    fdir.mkdir(parents=True, exist_ok=True)
-    idx = pd.date_range("2026-01-06 00:00", periods=96, freq="15min", tz=UTC)
-    for t in TARGETS:
-        pd.DataFrame(
-            {
-                "quantile_P10": [1.0] * 96,
-                "quantile_P50": [2.0] * 96,
-                "quantile_P90": [3.0] * 96,
-            },
-            index=idx,
-        ).to_parquet(fdir / f"{t}__xgboost.parquet")
-    ok, meta = _check_forecast_files(day, "0530", "d1")
-    assert ok, meta
-    # break one file -> fails
-    next(iter(fdir.glob("*__*.parquet"))).unlink()
-    ok2, meta2 = _check_forecast_files(day, "0530", "d1")
-    assert not ok2 and "missing" in meta2["problems"]
+    assert len(expected_index(date(2026, 1, 5), "d1")) == 96
+    assert len(expected_index(date(2026, 1, 5), "d10")) == 960
+    assert len(expected_index(date(2026, 3, 28), "d1")) == 92
 
 
 def test_ops_failure_alert_never_raises(monkeypatch, tmp_path):
@@ -310,13 +339,15 @@ def test_ops_failure_alert_never_raises(monkeypatch, tmp_path):
     )
 
     from delukit.dagster_app import definitions as D
+    from delukit.ops import alerts
 
     monkeypatch.setattr(D, "ALERTS_LOG", tmp_path / "alerts.log")
+    monkeypatch.setattr(alerts, "ALERT_DB", tmp_path / "alerts.db")
     monkeypatch.setenv("DELUKIT_ALERT_WEBHOOK", "")
 
     ctx = MagicMock(spec=RunStatusSensorContext)
     ctx.dagster_run.job_name = "j"
     ctx.dagster_run.run_id = "r"
     ctx.dagster_event = None
-    D.ops_failure_alert(ctx)  # must not raise
+    D.ops_failure_alert(ctx)
     assert (tmp_path / "alerts.log").exists()

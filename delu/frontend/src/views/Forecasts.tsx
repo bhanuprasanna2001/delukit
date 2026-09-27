@@ -79,7 +79,7 @@ export function Forecasts() {
         setError(e.message);
         setLoading(false);
       });
-  }, [eff?.date, eff?.gate, eff?.span, eff?.target, eff?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eff]);
 
   if (!opts) {
     return (

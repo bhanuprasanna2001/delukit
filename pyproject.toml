@@ -23,9 +23,9 @@ dependencies = [
 delukit = "delukit.sources.sync:main"
 delukit-clean = "delukit.data.clean:main"
 delukit-dataset = "delukit.data.dataset:main"
-delukit-forecast = "delukit.forecast:main"
-delukit-backtest = "delukit.backtest:main"
-delukit-tune = "delukit.tune:main"
+delukit-forecast = "delukit.models.forecast:main"
+delukit-backtest = "delukit.evaluation.backtest:main"
+delukit-tune = "delukit.models.tune:main"
 
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]

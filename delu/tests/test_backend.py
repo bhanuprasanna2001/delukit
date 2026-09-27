@@ -1,10 +1,5 @@
-"""DELU backend: auth/keys quotas, forecast files, HTTP surface.
-
-Why these: account enumeration, quota reset on refresh, and export/forecast
-path handling are the real incidents; trivial getters are not tested.
-"""
-
 import io
+import json
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -12,7 +7,6 @@ import pandas as pd
 import pytest
 
 
-# --- auth ---
 def test_signup_login_verify_lifecycle(tmp_dirs, monkeypatch):
     from backend import auth, keys
 
@@ -25,9 +19,9 @@ def test_signup_login_verify_lifecycle(tmp_dirs, monkeypatch):
     assert user["email"] == "user@example.com" and not user["verified"]
     vtoken = auth.issue_verify_token(uid)
     assert auth.consume_verify_token(vtoken) == uid
-    assert auth.consume_verify_token(vtoken) is None  # single use
+    assert auth.consume_verify_token(vtoken) is None
     assert auth.session_user(token)["verified"]
-    assert keys.describe(uid) is None  # no key until one is issued
+    assert keys.describe(uid) is None
     _prefix, raw = keys.issue(uid)
     assert raw.startswith("delu_live_") and keys.lookup(raw)["user_id"] == uid
 
@@ -53,7 +47,7 @@ def test_throttle_locks_and_clears(tmp_dirs):
     with pytest.raises(ValueError, match="Too many attempts"):
         auth.check_throttle(key)
     auth.note_ok(key)
-    auth.check_throttle(key)  # ok again
+    auth.check_throttle(key)
 
 
 def test_delete_account_cleans_quotas(tmp_dirs):
@@ -85,26 +79,51 @@ def test_keys_minute_quota_and_refresh_carries_day(tmp_dirs):
     kid = keys.lookup(raw)["id"]
     assert keys.lookup("wrong_prefix_key") is None
     assert keys.lookup("delu_live_" + "x" * 43) is None
-    # Loop until the quota trips: usage buckets are wall-clock minutes,
-    # so a fixed count can straddle a boundary on slow runners.
     for _ in range(2 * keys.MIN_LIMIT):
         ok, retry = keys.check_and_hit(kid)
         if not ok:
             break
     assert not ok and retry > 0
-    _, _raw2 = keys.issue(uid)  # refresh kills the old key, carries the quotas
+    _, _raw2 = keys.issue(uid)
     assert keys.lookup(raw) is None
     desc = keys.describe(uid)
     assert (
         desc["used_today"] >= keys.MIN_LIMIT and desc["daily_limit"] == keys.DAY_LIMIT
     )
-    # Minute quota carries too: a refresh must never mint fresh allowance.
-    # (SQLite reuses the key id here, which used to wipe the carried row.)
     ok2, retry2 = keys.check_and_hit(keys.lookup(_raw2)["id"])
     assert not ok2 and retry2 > 0
 
 
-# --- forecasts ---
+def test_api_lists_only_published_gate(tmp_dirs):
+    from backend import forecasts
+
+    day = tmp_dirs["forecasts"] / "2026-01-05"
+    run = day / ".runs" / "run-1" / "d1"
+    _write_forecast(run, "load_actual_mw")
+    assert forecasts.options()["dates"] == []
+    assert forecasts.options()["runs"] == {}
+
+    path = run / "load_actual_mw__xgboost.parquet"
+    (day / "0530.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "day": "2026-01-05",
+                "gate": "0530",
+                "products": [
+                    {
+                        "span": "d1",
+                        "target": "load_actual_mw",
+                        "path": str(path.relative_to(day)),
+                    }
+                ],
+            }
+        )
+    )
+    assert forecasts.options()["runs"]["2026-01-05"]["d1"] == ["0530"]
+    assert forecasts._newest("2026-01-05", "0530", "d1", "load_actual_mw") == path
+
+
 def _write_forecast(fdir, target, day="2026-01-06", model="xgboost", n=96):
     fdir.mkdir(parents=True, exist_ok=True)
     idx = pd.date_range(f"{day} 00:00", periods=n, freq="15min", tz="UTC")
@@ -286,7 +305,6 @@ def test_download_files_lists_newest_days(tmp_dirs):
     assert len(F.download_files(7)) == 2
 
 
-# --- app ---
 def _client(tmp_dirs, monkeypatch):
     monkeypatch.setattr("backend.mail.send_verify", lambda *a, **k: None)
     monkeypatch.setattr("backend.mail.send_contact", lambda *a, **k: True)
@@ -342,8 +360,6 @@ def test_app_v1_quota_and_export(tmp_dirs, monkeypatch, actuals):
     r = c.get("/v1/forecast", headers={"X-API-Key": raw})
     assert r.status_code == 200 and r.headers["X-RateLimit-Day"] == str(keys.DAY_LIMIT)
     kid = keys.lookup(raw)["id"]
-    # Loop until the quota trips (see above): a fixed count can straddle
-    # a wall-clock minute boundary on slow runners.
     for _ in range(2 * keys.MIN_LIMIT):
         if not keys.check_and_hit(kid)[0]:
             break
@@ -362,7 +378,7 @@ def test_app_auth_enumeration_and_contact_throttle(tmp_dirs, monkeypatch):
     bad1 = c.post("/auth/login", json={"email": "e@x.co", "password": "wrong1234"})
     bad2 = c.post("/auth/login", json={"email": "nouser@x.co", "password": "wrong1234"})
     assert bad1.status_code == bad2.status_code == 401
-    assert bad1.json() == bad2.json()  # same error, no enumeration
+    assert bad1.json() == bad2.json()
     body = {"name": "Ab", "email": "a@b.co", "topic": "Hi", "message": "hello world!"}
     assert c.post("/api/contact", json=body).status_code == 200
     assert c.post("/api/contact", json={**body, "email": "bad"}).status_code == 400
@@ -376,5 +392,5 @@ def test_mail_never_raises_without_config(monkeypatch):
 
     monkeypatch.setattr(mail, "RESEND_API_KEY", "")
     monkeypatch.setattr(mail, "SMTP_HOST", "")
-    mail.send_verify("a@b.co", "http://x/?verify=t")  # logs, no raise
+    mail.send_verify("a@b.co", "http://x/?verify=t")
     assert mail.send_contact("N", "a@b.co", "T", "hello world") is False
