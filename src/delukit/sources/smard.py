@@ -1,8 +1,3 @@
-"""Raw SMARD XML exports, one file per day.
-
-Layout: data/raw/<day>/smard/<category>/data.xml
-"""
-
 import logging
 import re
 import time
@@ -24,17 +19,22 @@ from delukit.core.parallel import run_parallel
 
 log = logging.getLogger(__name__)
 
-REQUEST_GAP = 1.0  # per worker; 4 workers ≈ 4 req/s
+REQUEST_GAP = 1.0
 WORKERS = 4
 MAX_RETRIES = 3
 
-# <Header> carries the server's export timestamp, not data; ignore it or
-# every re-fetch looks "updated".
 _HEADER = re.compile(rb"<Header>.*?</Header>", re.DOTALL)
 
 
 def _comparable(body):
     return _HEADER.sub(b"", body)
+
+
+def _required_child(element: ET.Element, path: str) -> ET.Element:
+    child = element.find(path)
+    if child is None:
+        raise ValueError(f"SMARD response is missing <{path}>.")
+    return child
 
 
 def _body(category, day):
@@ -76,7 +76,6 @@ def _download(session, category, day):
 
 
 def _parse(body):
-    """Raw bytes, None for an empty export, False for invalid XML."""
     try:
         root = ET.fromstring(body)
     except ET.ParseError:
@@ -161,7 +160,6 @@ def _slug(name):
 
 
 def _columns(category, components):
-    """Canonical clean names for a category's components, in file order."""
     if category in ("day_ahead_prices", "load_actual", "load_forecast"):
         return {
             "day_ahead_prices": "price_day_ahead_eur_mwh",
@@ -173,7 +171,6 @@ def _columns(category, components):
 
 
 def to_clean(days=None):
-    """Parse every raw day-file into data/clean/smard.parquet (NaN on gaps)."""
     import pandas as pd
 
     from delukit.core.clean import (
@@ -193,15 +190,14 @@ def to_clean(days=None):
             if not path.exists():
                 continue
             root = ET.parse(path).getroot()
-            components = root.find("Category").find("Components").findall("Component")
+            category_node = _required_child(root, "Category")
+            components_node = _required_child(category_node, "Components")
+            components = components_node.findall("Component")
             names = _columns(category, components)
             if isinstance(names, str):
                 names = [names]
             for name, comp in zip(names, components, strict=True):
-                # Positional mapping: i-th value is the i-th quarter of the
-                # Berlin day. This survives the duplicated 2am hour on
-                # fall-back days; values past midnight belong to next day.
-                values = comp.find("Values").findall("Value_detail")
+                values = _required_child(comp, "Values").findall("Value_detail")
                 if len(values) < len(grid):
                     log.warning(
                         "smard %s %s: only %d values for %d quarters",

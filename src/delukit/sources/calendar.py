@@ -1,25 +1,3 @@
-"""DE-LU calendar, one file per day and country.
-
-Layout: data/raw/<day>/calendar/<de|lu>/data.json
-
-Each file holds that day's deterministic date parts (Monday=0 day_of_week,
-weekend), nationwide public-holiday flags, plus the regional detail shaping
-zone load: per-subdivision public holidays (e.g. Assumption Day in BY/SL)
-and school holidays. Downstream combines DE and LU with OR -- the same
-holiday/weekend/school-break dummies day-ahead price models use as exogenous
-regressors (OpenSTEF HolidayFeatureAdder, EPFToolbox, mlforecast X_df).
-
-Raw API payloads are cached per country, kind and year under
-data/cache/openholidays/<ISO>/<public|school>/<year>.json. Years are fetched
-one at a time, always inside the API's 3-year per-request limit. Past years
-are immutable; the current and future years re-fetch when older than
-REFRESH_DAYS, and daily files are rewritten when the flags change.
-
-``is_holiday`` / ``is_bridge_day`` stay nationwide: a single state's holiday
-doesn't move zone-level load, and bridge days are a national long-weekend
-effect. Subdivision detail is kept verbatim for downstream weighting.
-"""
-
 import json
 import logging
 import threading
@@ -56,7 +34,6 @@ _fetch_lock = threading.Lock()
 
 
 def _throttle():
-    """Space requests REQUEST_GAP apart across all workers."""
     global _last_request
     with _throttle_lock:
         wait = _last_request + REQUEST_GAP - time.monotonic()
@@ -139,7 +116,6 @@ def _parse_records(payload, source, kind):
 
 
 def _nationwide_dates(records):
-    """Nationwide public-holiday dates, expanding multi-day ranges."""
     holidays = set()
     for record in records:
         if not record.get("nationwide"):
@@ -157,11 +133,10 @@ def _fresh(path):
 
 
 def _year_records(session, kind, iso, year, today):
-    """Raw records for one country/kind/year, from cache when usable."""
     path = OPENHOLIDAYS_CACHE_DIR / iso / kind / f"{year}.json"
     if path.exists() and (year < today.year or _fresh(path)):
         return _parse_records(path.read_bytes(), f"cache: {path}", kind)
-    with _fetch_lock:  # one fetch per file; concurrent days share it
+    with _fetch_lock:
         if path.exists() and (year < today.year or _fresh(path)):
             return _parse_records(path.read_bytes(), f"cache: {path}", kind)
         payload = _download(session, kind, iso, year)
@@ -183,7 +158,6 @@ def _english_name(record):
 
 
 def _covering(records, day, kind):
-    """Entries covering ``day``, deduped across overlapping yearly caches."""
     out = []
     seen = set()
     for record in records:
@@ -215,10 +189,9 @@ def _document(iso, day, public, school):
     nationwide = _nationwide_dates(public)
     public_covering = _covering(public, day, "public")
     school_covering = _covering(school, day, "school")
-    dow = day.weekday()  # Monday=0
+    dow = day.weekday()
     is_weekend = dow >= 5
     is_holiday = day in nationwide
-    # Monday off the back of a Tuesday holiday, Friday off a Thursday one.
     is_bridge = (dow == 0 and day + timedelta(days=1) in nationwide) or (
         dow == 4 and day - timedelta(days=1) in nationwide
     )
@@ -254,7 +227,6 @@ def fetch_day(category, day, today=None, session=None):
     own = session is None
     session = session or requests.Session()
     try:
-        # Neighbor years cover bridge checks and breaks at Jan 1 / Dec 31.
         years = sorted(
             {(day - timedelta(days=1)).year, day.year, (day + timedelta(days=1)).year}
         )
@@ -324,11 +296,6 @@ def _flags(doc):
 
 
 def to_clean(days=None):
-    """Expand daily raw files to quarter-hours: data/clean/calendar.parquet.
-
-    Per-country flags keep their ``de_``/``lu_`` prefix; combined columns OR
-    both countries, matching how zone load sees holidays.
-    """
     import json
 
     import pandas as pd
@@ -361,7 +328,10 @@ def to_clean(days=None):
                     continue
                 for key, value in flags.items():
                     record[f"{prefix}_{key}"] = value
-            weekend = docs.get("de", docs.get("lu"))["day_of_week"] >= 5
+            day_doc = docs.get("de") or docs.get("lu")
+            if day_doc is None:
+                raise ValueError(f"No calendar day document for {day}.")
+            weekend = day_doc["day_of_week"] >= 5
             de_hol = de["is_holiday"] if de else False
             lu_hol = lu["is_holiday"] if lu else False
             record["is_weekend"] = weekend

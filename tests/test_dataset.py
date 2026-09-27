@@ -14,7 +14,7 @@ def _frame(idx, **cols):
 
 
 def test_delayed_stamps_index_plus_delay(qindex):
-    from delukit.dataset import _delayed
+    from delukit.data.dataset import _delayed
 
     df = _frame(qindex, load_actual_mw=[1.0, 2.0, 3.0, 4.0])
     part = _delayed(df, ["load_actual_mw"], timedelta(minutes=75))
@@ -22,27 +22,26 @@ def test_delayed_stamps_index_plus_delay(qindex):
 
 
 def test_published_lands_day_before_at_wall(qindex):
-    from delukit.dataset import _published
+    from delukit.data.dataset import _published
 
     df = _frame(qindex, load_forecast_mw=[1.0, 2.0, 3.0, 4.0])
     part = _published(df, ["load_forecast_mw"], dtime(10, 30))
     avail = part.data["available_at"]
-    # Berlin day 2026-01-05 published 2026-01-04 10:30 Berlin
     assert (avail.dt.tz_convert("Europe/Berlin").dt.date == date(2026, 1, 4)).all()
     assert (avail.dt.tz_convert("Europe/Berlin").dt.hour == 10).all()
 
 
 def test_guard_unmapped_raises_on_drift(qindex):
-    from delukit.dataset import _guard_unmapped
+    from delukit.data.dataset import _guard_unmapped
 
     df = _frame(qindex, load_actual_mw=[1.0] * 4, new_col=[1.0] * 4)
     with pytest.raises(ValueError, match="unmapped clean columns"):
         _guard_unmapped(df, ["load_actual_mw"])
-    _guard_unmapped(df, ["load_actual_mw"], skipped=("new_col",))  # ok
+    _guard_unmapped(df, ["load_actual_mw"], skipped=("new_col",))
 
 
 def test_entsoe_parts_split_five_events(qindex):
-    from delukit.dataset import _entsoe_parts
+    from delukit.data.dataset import _entsoe_parts
 
     df = _frame(
         qindex,
@@ -70,13 +69,13 @@ def test_entsoe_parts_split_five_events(qindex):
 
 def test_smard_parts_derives_total_and_skips_price(qindex):
     from delukit.core.config.products import GEN_TOTAL_COLUMNS
-    from delukit.dataset import _smard_parts
+    from delukit.data.dataset import _smard_parts
 
     cols = {
         "load_actual_mwh": [10.0] * 4,
         "load_forecast_mwh": [9.0] * 4,
         "gen_forecast_wind_onshore_mwh": [2.0] * 4,
-        "price_day_ahead_eur_mwh": [50.0] * 4,  # restatement, skipped not mapped
+        "price_day_ahead_eur_mwh": [50.0] * 4,
     }
     cols.update({c: [1.0] * 4 for c in GEN_TOTAL_COLUMNS})
     df = _frame(qindex, **cols)
@@ -86,13 +85,13 @@ def test_smard_parts_derives_total_and_skips_price(qindex):
 
 
 def test_calendar_part_drops_strings_and_renames(qindex):
-    from delukit.dataset import _calendar_part
+    from delukit.data.dataset import _calendar_part
 
     df = _frame(
         qindex,
         is_holiday=[True] * 4,
         is_weekend=[False] * 4,
-        school_subdivisions=["BY|BW"] * 4,  # identifier, not a feature
+        school_subdivisions=["BY|BW"] * 4,
     )
     part = _calendar_part(df)
     assert "is_holiday_delu" in part.feature_names
@@ -103,7 +102,7 @@ def test_weather_part_expands_hourly_to_quarters():
     import pandas as pd
 
     from delukit.core.clean import UTC
-    from delukit.dataset import WEATHER_FFILL_LIMIT, _weather_part
+    from delukit.data.dataset import WEATHER_FFILL_LIMIT, _weather_part
 
     assert WEATHER_FFILL_LIMIT == 7
     idx = pd.date_range("2026-01-05 00:00", periods=3, freq="h", tz=UTC)
@@ -120,10 +119,8 @@ def test_weather_part_expands_hourly_to_quarters():
         }
     ).set_index("timestamp_utc")
     part = _weather_part(df)
-    # 3 hourly points -> quarter grid covers 3h = 12 quarters minus edges
     assert len(part.data) >= 9
     assert "temperature_2m__frankfurt" in part.feature_names
-    # run_day + WEATHER_RUN_PUBLISH_UTC (07:00 UTC), not midnight
     assert (part.data["available_at"] == pd.Timestamp("2026-01-04 07:00", tz=UTC)).all()
 
 
@@ -133,7 +130,7 @@ def test_visible_filters_by_gate(qindex):
     import pandas as pd
 
     from delukit.core.clean import BERLIN, UTC
-    from delukit.dataset import _delayed, _gate, _visible
+    from delukit.data.dataset import _delayed, _gate, _visible
 
     df = _frame(qindex, load_actual_mw=[1.0] * 4)
     part = _delayed(df, ["load_actual_mw"], timedelta(minutes=75))
@@ -143,6 +140,5 @@ def test_visible_filters_by_gate(qindex):
     )
     rows = _visible(part, date(2026, 1, 5), gate)
     assert not rows.empty
-    # gate before any data -> nothing visible
     early = _gate(date(2026, 1, 4), dtime(5, 30))
     assert _visible(part, date(2026, 1, 5), early).empty

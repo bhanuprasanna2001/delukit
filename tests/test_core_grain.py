@@ -1,16 +1,9 @@
-"""Master grain (Berlin quarters) + parallel runner + product helpers.
-
-Why these: DST miscounts and sister-source leakage silently corrupt every
-downstream model; the parallel runner decides fetched/failed counts.
-"""
-
 from datetime import date, timedelta
 
 
 def test_day_bounds_dst_counts():
     from delukit.core.clean import day_bounds
 
-    # 2026-03-29 springs forward (92), 2026-10-25 falls back (100)
     assert day_bounds(date(2026, 1, 5))[2] == 96
     assert day_bounds(date(2026, 3, 29))[2] == 92
     assert day_bounds(date(2026, 10, 25))[2] == 100
@@ -86,13 +79,10 @@ def test_feature_exclude_keeps_target_and_known_curves():
     from delukit.core.config.products import feature_exclude
 
     excluded = feature_exclude("load_actual_mw", "1130", "d1")
-    # 1130/d1 is the only product that sees EXAA + ENTSO-E load forecast
     assert "price_exaa_eur_mwh" not in excluded
     assert "load_forecast_mw" not in excluded
-    assert "load_actual_mw" not in excluded  # target itself always kept
-    # sister-source actuals never valid features
+    assert "load_actual_mw" not in excluded
     assert "load_actual_mwh" in excluded
-    # other gates see no published curves
     assert "price_exaa_eur_mwh" in feature_exclude("load_actual_mw", "0530", "d1")
 
 

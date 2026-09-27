@@ -1,5 +1,3 @@
-"""Thread-pool runner for day-fetches. The main thread owns progress."""
-
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,11 +6,10 @@ log = logging.getLogger(__name__)
 
 
 class RateLimited(Exception):
-    """A worker is persistently rate limited; stop scheduling new work."""
+    pass
 
 
 def run_parallel(work, fetch, workers, on_each=None):
-    """Fetch ``(category, day)`` pairs; ``fetch`` returns a state string."""
     counts = {"fetched": 0, "updated": 0, "unchanged": 0, "no_data": 0, "failed": 0}
     stop = threading.Event()
 

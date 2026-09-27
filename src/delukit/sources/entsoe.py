@@ -1,8 +1,3 @@
-"""Raw ENTSO-E Transparency XML, one file per day.
-
-Layout: data/raw/<day>/entsoe/<category>/data.xml
-"""
-
 import logging
 import os
 import re
@@ -20,15 +15,11 @@ from delukit.core.parallel import RateLimited, run_parallel
 
 log = logging.getLogger(__name__)
 
-REQUEST_GAP = 1.0  # per worker; 6 workers ≈ 360 req/min, under the 400 limit
+REQUEST_GAP = 1.0
 WORKERS = 6
-RETRY_GAP = 60  # token banned ~10 min on abuse; leftovers resume next run
+RETRY_GAP = 60
 MAX_RETRIES = 3
 
-# Document <mRID> (random hex per response) and <createdDateTime> (fetch time)
-# are envelope metadata, not data; ignore them or every re-fetch looks
-# "updated". TimeSeries <mRID>1,2,..</TimeSeries> are stable indexes, kept.
-# Same idea as smard's <Header> strip.
 _VOLATILE = re.compile(
     rb"<mRID>[0-9a-fA-F]{32}</mRID>"
     rb"|<createdDateTime>.*?</createdDateTime>"
@@ -42,7 +33,6 @@ def _comparable(body):
 
 
 def _window(day):
-    """Day in Berlin as a UTC periodStart/periodEnd pair (YYYYMMDDHHMM)."""
     tz = ZoneInfo(TIMEZONE)
     start = datetime.combine(day, dtime.min, tz).astimezone(ZoneInfo("UTC"))
     end = datetime.combine(day + timedelta(days=1), dtime.min, tz).astimezone(
@@ -77,7 +67,6 @@ def _download(session, category, day):
 
 
 def _parse(body):
-    """Raw bytes, or None when the API reports no data for the day."""
     if b"No matching data found" in body:
         return None
     try:
@@ -174,7 +163,6 @@ def _series_key(category, header):
             "B19": "wind_onshore_forecast_mw",
         }[header["psr"]]
     if category == "generation_actual":
-        # B10 metered twice: pumping (outBiddingZone) vs turbine (inBiddingZone).
         suffix = ""
         if header["psr"] == "B10":
             suffix = "_inBZ" if header["in_bz"] else "_outBZ"
@@ -183,7 +171,6 @@ def _series_key(category, header):
 
 
 def _read_file(path):
-    """{series_key: {timestamp_utc: value}} for one raw day-file."""
     import pandas as pd
 
     root = ET.parse(path).getroot()
@@ -205,7 +192,11 @@ def _read_file(path):
                 )
             elif name == "inBiddingZone_Domain.mRID":
                 header["in_bz"] = True
+        if period is None:
+            raise ValueError("missing Period in ENTSO-E TimeSeries")
         match = re.fullmatch(r"PT(\d+)([MH])", _text(period, "resolution"))
+        if match is None:
+            raise ValueError("invalid ENTSO-E Period resolution")
         step = int(match.group(1)) * (60 if match.group(2) == "H" else 1)
         start = _period_start(period)
         key = _series_key(path.parent.name, header)
@@ -217,9 +208,15 @@ def _read_file(path):
             for field in point:
                 fname = _local(field.tag)
                 if fname == "position":
+                    if field.text is None:
+                        raise ValueError("missing ENTSO-E Point position")
                     pos = int(field.text)
                 elif fname in ("quantity", "price.amount"):
+                    if field.text is None:
+                        raise ValueError(f"missing ENTSO-E Point {fname}")
                     value = float(field.text)
+            if pos is None:
+                raise ValueError("missing ENTSO-E Point position")
             stamp = start + timedelta(minutes=step * (pos - 1))
             series[pd.Timestamp(stamp)] = value
     return out
@@ -228,6 +225,8 @@ def _read_file(path):
 def _text(period, name):
     for child in period:
         if _local(child.tag) == name:
+            if child.text is None:
+                raise ValueError(f"empty <{name}> in ENTSO-E Period")
             return child.text
     raise ValueError(f"missing <{name}> in ENTSO-E Period")
 
@@ -237,16 +236,13 @@ def _period_start(period):
         if _local(child.tag) == "timeInterval":
             for field in child:
                 if _local(field.tag) == "start":
+                    if field.text is None:
+                        raise ValueError("empty Period timeInterval start")
                     return datetime.fromisoformat(field.text)
     raise ValueError("missing Period timeInterval start")
 
 
 def to_clean(days=None):
-    """Parse every raw day-file into data/clean/entsoe.parquet.
-
-    NaN on gaps, except solar: the TSO omits night quarters (PV is zero),
-    so a partial solar series is completed with 0. Missing files stay NaN.
-    """
     import pandas as pd
 
     from delukit.core.clean import (

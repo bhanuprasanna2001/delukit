@@ -1,9 +1,3 @@
-"""Open-Meteo single-runs API, ecmwf_ifs 00z runs.
-
-One cell_selection per request, so locations are grouped:
-2 requests per day, runs immutable.
-"""
-
 WEATHER_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 WEATHER_MODEL = "ecmwf_ifs"
 WEATHER_FORECAST_DAYS = 16
@@ -16,7 +10,6 @@ WEATHER_FIELDS = (
     "cloud_cover",
 )
 
-# (name, latitude, longitude) per API cell_selection group.
 WEATHER_LOCATIONS = {
     "land": (
         ("emden", 53.37, 7.21),

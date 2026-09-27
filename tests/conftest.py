@@ -1,11 +1,8 @@
-"""Shared fixtures: tmp data dirs for delukit sources/pipeline."""
-
 import pytest
 
 
 @pytest.fixture
 def tmp_dirs(monkeypatch, tmp_path):
-    """Point every delukit data dir at tmp (config + imported names)."""
     raw = tmp_path / "raw"
     clean = tmp_path / "clean"
     versioned = tmp_path / "versioned"
@@ -47,7 +44,6 @@ def tmp_dirs(monkeypatch, tmp_path):
 
 @pytest.fixture
 def qindex():
-    """4 UTC quarters starting midnight Berlin 2026-01-05 (a Monday)."""
     from datetime import datetime
 
     import pandas as pd

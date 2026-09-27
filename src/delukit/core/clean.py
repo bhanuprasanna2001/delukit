@@ -1,10 +1,3 @@
-"""Shared clean-build helpers (raw -> data/clean/*.parquet).
-
-Master grain is the Berlin quarter-hour. Timestamps are generated in UTC
-directly (midnight-to-midnight Berlin converted to UTC), so DST days
-naturally yield 92/96/100 quarters with no fold bookkeeping.
-"""
-
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
@@ -19,7 +12,6 @@ BERLIN = ZoneInfo(TIMEZONE)
 
 
 def raw_days() -> list[date]:
-    """Sorted days present under data/raw."""
     return [
         date.fromisoformat(p.name)
         for p in sorted(BASE_DIR.iterdir())
@@ -36,39 +28,37 @@ def _is_date(name: str) -> bool:
 
 
 def day_bounds(day: date) -> tuple[datetime, datetime, int]:
-    """(start_utc, end_utc, n_quarters) for a Berlin day."""
     start = datetime.combine(day, dtime.min, BERLIN).astimezone(UTC)
     end = datetime.combine(day + timedelta(days=1), dtime.min, BERLIN).astimezone(UTC)
     return start, end, int((end - start).total_seconds() // 900)
 
 
 def quarter_grid(day: date) -> pd.DatetimeIndex:
-    """UTC instants of every quarter-hour of a Berlin day."""
     start, _, n = day_bounds(day)
     return pd.DatetimeIndex([start + timedelta(minutes=15 * i) for i in range(n)])
 
 
 def master_index(days: list[date]) -> pd.DatetimeIndex:
-    """Full quarter-hour UTC index over all days."""
     parts = [quarter_grid(day) for day in days]
-    return parts[0].append(parts[1:]) if parts else pd.DatetimeIndex([])
+    if not parts:
+        return pd.DatetimeIndex([], tz=UTC)
+    return pd.DatetimeIndex([stamp for part in parts for stamp in part])
 
 
 def frame(idx: pd.DatetimeIndex) -> pd.DataFrame:
-    """Empty frame with canonical time columns on the given UTC index."""
     berlin = idx.tz_convert(BERLIN)
+    local_time = pd.Series(berlin, index=idx)
     return pd.DataFrame(
         {
             "timestamp_utc": idx,
             "timestamp_berlin": berlin,
-            "date": berlin.date.astype(str),
-            "quarter": berlin.hour * 4 + berlin.minute // 15 + 1,
+            "date": local_time.dt.date.astype(str),
+            "quarter": local_time.dt.hour * 4 + local_time.dt.minute // 15 + 1,
         }
     ).set_index("timestamp_utc")
 
 
 def write_clean(df: pd.DataFrame, name: str) -> Path:
-    """Sort by timestamp_utc and atomically write data/clean/<name>.parquet."""
     path = CLEAN_DIR / f"{name}.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     df = df.sort_index()

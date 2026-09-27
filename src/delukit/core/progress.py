@@ -12,7 +12,6 @@ from rich.progress import (
 
 @contextmanager
 def sync_progress(totals):
-    """One rich bar per source; ``advance(source, day, state)`` feeds it."""
     with Progress(
         TextColumn("[bold cyan]{task.description}"),
         BarColumn(bar_width=None),

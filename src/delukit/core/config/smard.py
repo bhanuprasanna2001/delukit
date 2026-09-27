@@ -1,8 +1,3 @@
-"""SMARD download manager, DE-LU region, 15min resolution.
-
-One XML per category.
-"""
-
 SMARD_URL = "https://www.smard.de/nip-download-manager/nip/download/market-data"
 SMARD_REGION = "DE-LU"
 SMARD_RESOLUTION = "quarterhour"

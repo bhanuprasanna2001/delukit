@@ -1,11 +1,3 @@
-"""Raw Open-Meteo single-run forecasts, one file per day and cell group.
-
-Layout: data/raw/<day>/weather/<land|sea>/data.json
-
-Each file holds one model's 00z run for every location in the group.
-Runs are immutable: a file, once written, is never re-fetched.
-"""
-
 import json
 import logging
 import re
@@ -28,7 +20,7 @@ from delukit.core.parallel import RateLimited, run_parallel
 log = logging.getLogger(__name__)
 
 REQUEST_GAP = 60 / 27
-WORKERS = 2  # one per cell group; the gap above is the real limit
+WORKERS = 2
 RETRY_GAP = 60
 MAX_RETRIES = 3
 
@@ -43,7 +35,6 @@ _UNAVAILABLE = re.compile(
 
 
 def _throttle():
-    """Space requests REQUEST_GAP apart across all workers."""
     global _last_request
     with _lock:
         wait = _last_request + REQUEST_GAP - time.monotonic()
@@ -80,7 +71,7 @@ def _download(session, group, day):
                 raise
             time.sleep(2**attempt)
             continue
-        if response.status_code == 204:  # run not published yet
+        if response.status_code == 204:
             return None
         if response.status_code == 429:
             if attempt == MAX_RETRIES:
@@ -91,7 +82,7 @@ def _download(session, group, day):
         if response.status_code in (500, 502, 503, 504) and attempt < MAX_RETRIES:
             time.sleep(2**attempt)
             continue
-        if response.status_code == 400:  # unavailable run, let _parse map to no_data
+        if response.status_code == 400:
             return response.content
         response.raise_for_status()
         return response.content
@@ -99,7 +90,6 @@ def _download(session, group, day):
 
 
 def _parse(body, group):
-    """Raw bytes, None when the run is not available, False when invalid."""
     if body is None or _UNAVAILABLE.fullmatch(body):
         return None
     try:
@@ -130,7 +120,7 @@ def _parse(body, group):
 def fetch_day(group, day, session=None):
     path = BASE_DIR / day.isoformat() / "weather" / group / "data.json"
 
-    if path.exists():  # runs never change; fetch each run once
+    if path.exists():
         return "unchanged"
 
     own = session is None
@@ -179,11 +169,6 @@ def sync(start, end, on_each=None):
 
 
 def to_clean(days=None):
-    """Parse every raw run-file into versioned data/clean/weather.parquet.
-
-    One row per run x location x valid hour. ``available_at`` is the run's
-    00z issue time, so downstream can replay what was known when.
-    """
     import json
 
     import pandas as pd
@@ -217,17 +202,9 @@ def to_clean(days=None):
                         }
                     )
     df = pd.DataFrame(rows)
-    # Spring-forward days contain a nonexistent 02:00 wall time that maps onto
-    # the same UTC instant as 03:00; keep the real one. Fall-back's single 02:00
-    # maps fold=0, leaving a 1h gap downstream ffill covers (limit 96 quarters).
-    # ponytail: hourly wall-time API can't represent both folds; UTC-native
-    # hourly+minute API if this gap ever matters.
     df = df.drop_duplicates(
         subset=["run_day", "location", "timestamp_utc"], keep="last"
     )
-    # Night radiation arrives as null in some runs, 0.0 in others; null
-    # alongside a valid temperature is night (-> 0). Run-tail nulls
-    # (all fields null) stay NaN.
     night = df["shortwave_radiation"].isna() & df["temperature_2m"].notna()
     df.loc[night, "shortwave_radiation"] = 0.0
     df["timestamp_berlin"] = pd.to_datetime(df["timestamp_utc"]).dt.tz_convert(BERLIN)

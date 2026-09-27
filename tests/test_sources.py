@@ -1,21 +1,13 @@
-"""Source parsers: bytes in -> state out. No network.
-
-Why these: every provider has its own empty/invalid envelope; misreading it
-as data (or data as empty) silently gaps the clean tables. Comparable-strip
-tests pin the 'every re-fetch looks updated' bug.
-"""
-
 from datetime import date
 
 import pytest
 
 
-# --- SMARD ---
 def test_smard_parse_envelopes():
     from delukit.sources.smard import _parse
 
-    assert _parse(b"<Categories/>") is False  # no Category at all
-    assert _parse(b"<Categories><Category/></Categories>") is None  # no Components
+    assert _parse(b"<Categories/>") is False
+    assert _parse(b"<Categories><Category/></Categories>") is None
     assert _parse(b"not xml") is False
     empty = b"<Categories><Category><Components></Components></Category></Categories>"
     assert _parse(empty) is None
@@ -39,7 +31,7 @@ def test_smard_number_and_slug_and_columns():
     from delukit.sources.smard import _columns, _number, _slug
 
     assert _number("1,234") == 1234.0
-    assert _number("-") != _number("-")  # NaN
+    assert _number("-") != _number("-")
     assert _slug("Wind Onshore") == "wind_onshore"
     assert _slug("Photo-voltaics") == "photo_voltaics"
     assert _columns("load_actual", []) == "load_actual_mwh"
@@ -50,7 +42,7 @@ def test_smard_fetch_day_caches_old_file(tmp_dirs, monkeypatch):
     from delukit.sources import smard
 
     day = date(2026, 1, 5)
-    today = date(2026, 1, 20)  # old enough to be cached once written
+    today = date(2026, 1, 20)
     body = (
         b"<Categories><Category><Components><Component><Values>"
         b"<Value_detail><Value>1</Value></Value_detail>"
@@ -85,7 +77,6 @@ def test_smard_fetch_day_caches_old_file(tmp_dirs, monkeypatch):
     assert session.posts == 1
 
 
-# --- ENTSO-E ---
 def test_entsoe_parse_and_comparable():
     from delukit.sources.entsoe import _comparable, _parse
 
@@ -96,7 +87,6 @@ def test_entsoe_parse_and_comparable():
     a = b"<mRID>abcdef0123456789abcdef0123456789</mRID><createdDateTime>2026</createdDateTime><revisionNumber>1</revisionNumber><TimeSeries><mRID>1</mRID></TimeSeries>"
     b = b"<mRID>ffffffffffffffffffffffffffffffff</mRID><createdDateTime>2027</createdDateTime><revisionNumber>2</revisionNumber><TimeSeries><mRID>1</mRID></TimeSeries>"
     assert _comparable(a) == _comparable(b)
-    # TimeSeries index mRIDs are data, kept
     assert b"<mRID>1</mRID>" in _comparable(a)
 
 
@@ -104,7 +94,7 @@ def test_entsoe_window_is_berlin_day_in_utc():
     from delukit.sources.entsoe import _window
 
     start, end = _window(date(2026, 1, 5))
-    assert start == "202601042300"  # midnight Berlin = 23:00 UTC prev day (winter)
+    assert start == "202601042300"
     assert end == "202601052300"
 
 
@@ -155,7 +145,6 @@ def test_entsoe_series_key():
     )
 
 
-# --- Weather ---
 def test_weather_parse():
     import json
 
@@ -170,7 +159,7 @@ def test_weather_parse():
         for _ in range(n)
     ]
     assert _parse(json.dumps(good).encode(), "land") is not None
-    assert _parse(json.dumps(good[:1]).encode(), "land") is False  # wrong length
+    assert _parse(json.dumps(good[:1]).encode(), "land") is False
     assert (
         _parse(
             json.dumps(
@@ -192,7 +181,6 @@ def test_weather_fetch_day_immutable(tmp_dirs):
     assert weather.fetch_day("land", day) == "unchanged"
 
 
-# --- Calendar ---
 def test_calendar_records_validation():
     from delukit.sources.calendar import _parse_records
 
@@ -220,8 +208,7 @@ def test_calendar_document_bridge_and_nationwide():
             "name": [],
         }
     ]
-    # Thursday 2026-12-24 is a bridge eve? Friday 2026-12-25 holiday -> Thu is not bridge; Mon 2026-12-28? dow Monday with Tue holiday
-    doc = _document("DE", date(2026, 12, 28), [], [])  # Monday, Tue 29th not holiday
+    doc = _document("DE", date(2026, 12, 28), [], [])
     assert doc["day_of_week"] == 0
     assert doc["is_bridge_day"] is False
     tue_hol = [
@@ -255,7 +242,6 @@ def test_calendar_fetch_day_writes_and_unchanged(tmp_dirs, monkeypatch):
     assert calendar.fetch_day("de", day, today=date(2026, 1, 20)) == "unchanged"
 
 
-# --- Energy-Charts ---
 def test_energy_charts_parse():
     import json
 

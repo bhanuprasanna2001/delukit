@@ -1,10 +1,5 @@
-"""ENTSO-E Transparency API, DE-LU bidding zone.
-
-Same queries entsoe-py makes, but we keep the raw XML instead of parsed CSVs.
-"""
-
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
-ENTSOE_AREA = "10Y1001A1001A82H"  # DE-LU
+ENTSOE_AREA = "10Y1001A1001A82H"
 
 entsoe_params = {
     "SDAC": {
@@ -13,7 +8,6 @@ entsoe_params = {
         "out_Domain": ENTSOE_AREA,
         "contract_MarketAgreement.type": "A01",
     },
-    # EXAA local auction, published in 15min resolution only.
     "EXAA": {
         "documentType": "A44",
         "in_Domain": ENTSOE_AREA,

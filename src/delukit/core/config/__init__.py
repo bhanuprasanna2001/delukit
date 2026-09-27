@@ -1,5 +1,3 @@
-"""Shared raw-sync settings (used by every source)."""
-
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,8 +8,6 @@ BASE_DIR = Path("data/raw")
 CLEAN_DIR = Path("data/clean")
 VERSIONED_DIR = Path("data/versioned")
 
-# Days with no local file yet are always fetched. Files younger than this are
-# re-fetched every run because providers revise recent data in place.
 REFRESH_DAYS = 7
 
 START = date(2025, 10, 1)
@@ -21,7 +17,6 @@ def end_date():
     return datetime.now(ZoneInfo("Europe/Berlin")).date() + timedelta(days=1)
 
 
-# Back-compat: `from delukit.core.config import <SOURCE_...>` keeps working.
 from delukit.core.config.calendar import (
     OPENHOLIDAYS_CACHE_DIR,
     OPENHOLIDAYS_PUBLIC_URL,

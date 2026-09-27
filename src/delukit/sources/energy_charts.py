@@ -1,11 +1,3 @@
-"""Raw Energy-Charts day-ahead prices, one file per day.
-
-Layout: data/raw/<day>/energy_charts/day_ahead_price/data.json
-
-DE-LU only. Prices are final once the day-ahead auction publishes, so a file
-once written is never re-fetched; days with no data yet (404) retry next run.
-"""
-
 import json
 import logging
 import time
@@ -23,7 +15,7 @@ from delukit.core.parallel import RateLimited, run_parallel
 
 log = logging.getLogger(__name__)
 
-REQUEST_GAP = 1.0  # per worker; 2 workers stay under the stricter v1.5 limits
+REQUEST_GAP = 1.0
 WORKERS = 2
 RETRY_GAP = 60
 MAX_RETRIES = 3
@@ -44,7 +36,7 @@ def _download(session, day):
                 raise
             time.sleep(2**attempt)
             continue
-        if response.status_code == 404:  # auction not published yet
+        if response.status_code == 404:
             return None
         if response.status_code == 429:
             if attempt == MAX_RETRIES:
@@ -63,7 +55,6 @@ def _download(session, day):
 
 
 def _parse(body):
-    """Raw bytes, None for an empty day, False for an invalid payload."""
     if body is None:
         return None
     try:
@@ -92,7 +83,7 @@ def fetch_day(category, day, session=None):
         raise ValueError(f"unknown Energy-Charts category: {category}")
     path = BASE_DIR / day.isoformat() / "energy_charts" / category / "data.json"
 
-    if path.exists():  # auction results never change; fetch each day once
+    if path.exists():
         return "unchanged"
 
     own = session is None
