@@ -30,6 +30,12 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
   <sub>The app at <code>:8000</code> shows four uncertainty bands, P50, and actuals.</sub>
 </p>
 
+<p align="center">
+  <img src="public/dagster.svg" alt="Dagster asset lineage from raw data to forecast gate" width="100%" />
+  <br />
+  <sub>The pipeline at <code>:3000</code> runs raw → clean → versioned → forecast gate, with training and scoring.</sub>
+</p>
+
 ## ✨ Why delukit
 
 - 🔮 **24 forecast products** — 6 targets × 2 gates × 2 spans, with XGBoost where a usable model exists
