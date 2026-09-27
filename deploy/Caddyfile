@@ -1,0 +1,4 @@
+{$DELU_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy delu:8000
+}

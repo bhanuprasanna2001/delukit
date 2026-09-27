@@ -1,0 +1,80 @@
+services:
+  delukit-daemon:
+    build: .
+    image: delukit:local
+    init: true
+    command: ["dagster-daemon", "run", "-m", "delukit.dagster_app.definitions"]
+    env_file: .env
+    environment:
+      TZ: Europe/Berlin
+      DAGSTER_HOME: /app/data/.dagster
+      DELUKIT_MODEL_THREADS: "2"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  dagster-webserver:
+    build: .
+    image: delukit:local
+    init: true
+    command: ["dagster-webserver", "-m", "delukit.dagster_app.definitions", "-h", "0.0.0.0", "-p", "3000"]
+    env_file: .env
+    environment:
+      TZ: Europe/Berlin
+      DAGSTER_HOME: /app/data/.dagster
+      DELUKIT_MODEL_THREADS: "2"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - delukit-daemon
+    restart: unless-stopped
+
+  delu:
+    build: ./delu
+    image: delu:local
+    init: true
+    environment:
+      TZ: Europe/Berlin
+      DELU_FORECASTS: /data/forecasts
+      DELU_ACTUALS: /data/clean
+      DELU_DB: /app/data/app.db
+      DELU_PUBLIC_URL: https://${DELU_DOMAIN:?Set DELU_DOMAIN in .env}
+      DELU_COOKIE_SECURE: "1"
+      DELU_REQUIRE_MAIL: "1"
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      CONTACT_TO: ${CONTACT_TO:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - ./data:/data:ro
+      - ./delu/data:/app/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    init: true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DELU_DOMAIN: ${DELU_DOMAIN:?Set DELU_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - delu
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
