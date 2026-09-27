@@ -183,8 +183,8 @@ export function Terms() {
       <div className="grid gap-4">
         <Section n="01" icon={Database} title="The service">
           <p>
-            DELU publishes day-ahead and 10-day point and probabilistic (P10 /
-            P50 / P90) forecasts for the German–Luxembourgian bidding zone:
+            DELU publishes day-ahead and 10-day point and probabilistic (P10
+            through P90) forecasts for the German–Luxembourgian bidding zone:
             load, solar, onshore and offshore wind, total generation, and the
             day-ahead price. Runs rebuild twice daily at 05:30 and 11:30
             Europe/Berlin. Each verified account gets one API key with 5,000
@@ -549,7 +549,7 @@ export function Contact() {
 export function Attribution() {
   return (
     <div className="grid gap-6">
-      <Hero lede="Measured data below belongs to its publishers and is reused under their licences. Only the P10 / P50 / P90 bands are DELU model output."
+      <Hero lede="Measured data below belongs to its publishers and is reused under their licences. Only the P10 through P90 forecast bands are DELU model output."
       />
 
       <div className="grid gap-4">
@@ -667,8 +667,8 @@ export function Attribution() {
 
         <Section n="05" icon={BadgeCheck} title="What is ours">
           <p>
-            The P10 / P50 / P90 forecast bands are produced by the DELU pipeline
-            (gradient-boosted model, two runs a day) and are original model
+            The P10 through P90 forecast bands are produced by the DELU pipeline
+            (registered forecast models, two runs a day) and are original model
             output. The citation rules on the{" "}
             <span className="text-ink">Terms</span> page apply: state which run
             (05:30 or 11:30) a result is based on.

@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import UTC, date, datetime, time, timedelta
 
 import pandas as pd
@@ -35,6 +36,7 @@ ALL_HISTORY = timedelta(days=365 * 30)
 
 PREDICT_MIN_LENGTH = timedelta(minutes=15)
 COVERAGE = 0.5
+SCORE_LOOKBACK_DAYS = 11
 EVAL_WINDOW = Window(lag=timedelta(hours=0), size=timedelta(days=21))
 BAND_FLOOR = {
     GATE_0530: timedelta(hours=18, minutes=30),
@@ -333,16 +335,24 @@ def main() -> None:
 def score_gate(day: date, gate: str, *, save: bool = True, ds=None) -> list[dict]:
     from openstef_core.datasets import ForecastDataset
 
-    from delukit.core.config.products import SPANS
+    from delukit.core.config.products import FORECAST_DIR, SPANS
     from delukit.data.dataset import QUARTER
     from delukit.ops.publication import expected_index, published_products
 
     ds = ds or load()
+    manifest = FORECAST_DIR / day.isoformat() / f"{gate}.json"
+    versions = {}
+    if manifest.is_file():
+        for item in json.loads(manifest.read_text())["products"]:
+            versions[(item["span"], item["target"])] = item.get("model_version")
     rows = []
     for span in SPANS:
         for target, used, path in published_products(day, gate, span):
             frame = pd.read_parquet(path)
-            quantile_cols = [c for c in frame.columns if "quantile_" in c]
+            quantile_cols = sorted(
+                (c for c in frame.columns if c.startswith("quantile_P")),
+                key=lambda name: int(name.removeprefix("quantile_P")),
+            )
             try:
                 part = next(p for p in ds.data_parts if target in p.feature_names)
             except StopIteration:
@@ -383,29 +393,34 @@ def score_gate(day: date, gate: str, *, save: bool = True, ds=None) -> list[dict
                 if truth_json is None:
                     raise ValueError("Could not serialize measurements for scoring.")
                 truth_hash = hashlib.sha256(truth_json.encode()).hexdigest()
-                rows.append(
+                row = {
+                    "day": day.isoformat(),
+                    "gate": gate,
+                    "span": span,
+                    "target": target,
+                    "model": used,
+                    "model_version": versions.get((span, target)),
+                    "lead_day": lead_day,
+                    "delivery_day": delivery_day.isoformat(),
+                    "expected_n": len(expected),
+                    "n": len(joined),
+                    "quantiles": ",".join(quantile_cols),
+                    "quantile_count": len(quantile_cols),
+                    "forecast_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "truth_sha256": truth_hash,
+                    "evaluated_at": datetime.now(UTC).isoformat(),
+                    "rmae": float(rmae),
+                    "rcrps": float(rcrps),
+                }
+                row.update(
                     {
-                        "day": day.isoformat(),
-                        "gate": gate,
-                        "span": span,
-                        "target": target,
-                        "model": used,
-                        "lead_day": lead_day,
-                        "delivery_day": delivery_day.isoformat(),
-                        "expected_n": len(expected),
-                        "n": len(joined),
-                        "forecast_sha256": hashlib.sha256(
-                            path.read_bytes()
-                        ).hexdigest(),
-                        "truth_sha256": truth_hash,
-                        "evaluated_at": datetime.now(UTC).isoformat(),
-                        "rmae": float(rmae),
-                        "rcrps": float(rcrps),
-                        "obs_p10": float(observed.get("0.1", float("nan"))),
-                        "obs_p50": float(observed.get("0.5", float("nan"))),
-                        "obs_p90": float(observed.get("0.9", float("nan"))),
+                        f"obs_p{percent}": float(
+                            observed.get(f"{percent / 100:.1f}", float("nan"))
+                        )
+                        for percent in range(10, 100, 10)
                     }
                 )
+                rows.append(row)
     if save:
         save_scores(rows)
     print(f"scores {day} {gate}: {len(rows)} product-lead days scored")
@@ -442,7 +457,7 @@ def save_scores(rows: list[dict]) -> None:
 def score_recent(as_of: date) -> list[dict]:
     ds = load()
     rows = []
-    for age in range(1, 12):
+    for age in range(1, SCORE_LOOKBACK_DAYS + 1):
         day = as_of - timedelta(days=age)
         for gate in GATE_WALL:
             rows.extend(score_gate(day, gate, save=False, ds=ds))

@@ -36,7 +36,7 @@ GEN_TOTAL_COLUMNS = (
     "gen_actual_other_conventional_mwh",
 )
 
-QUANTILES = [Q(0.1), Q(0.5), Q(0.9)]
+QUANTILES = [Q(level / 10) for level in range(1, 10)]
 
 SPAN_D1 = "d1"
 SPAN_D10 = "d10"

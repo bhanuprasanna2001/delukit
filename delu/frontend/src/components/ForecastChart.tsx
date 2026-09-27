@@ -5,6 +5,12 @@ interface Props {
   timestamps: string[];
   p50: (number | null)[];
   p10: (number | null)[] | null;
+  p20: (number | null)[] | null;
+  p30: (number | null)[] | null;
+  p40: (number | null)[] | null;
+  p60: (number | null)[] | null;
+  p70: (number | null)[] | null;
+  p80: (number | null)[] | null;
   p90: (number | null)[] | null;
   actual: (number | null)[];
   unit: string;
@@ -71,6 +77,12 @@ export function ForecastChart({
   timestamps,
   p50,
   p10,
+  p20,
+  p30,
+  p40,
+  p60,
+  p70,
+  p80,
   p90,
   actual,
   unit,
@@ -137,28 +149,32 @@ export function ForecastChart({
       return d;
     };
 
-    const bandPath = () => {
-      if (!p10 || !p90) return "";
+    const bandPath = (lower: (number | null)[] | null, upper: (number | null)[] | null) => {
+      if (!lower || !upper) return "";
       let d = "";
       let run: number[] = [];
       const flush = () => {
         if (run.length > 1) {
-          const a = run[0];
-          const b = run[run.length - 1];
-          let s = `M${x(a).toFixed(1)},${y(p10[a] as number).toFixed(1)}`;
-          for (let k = 1; k < run.length; k++) {
-            s += `L${x(run[k]).toFixed(1)},${y(p10[run[k]] as number).toFixed(1)}`;
+          let s = "";
+          for (const i of run) {
+            const value = lower[i];
+            if (value !== null) {
+              s += `${s ? "L" : "M"}${x(i).toFixed(1)},${y(value).toFixed(1)}`;
+            }
           }
           for (let k = run.length - 1; k >= 0; k--) {
-            s += `L${x(run[k]).toFixed(1)},${y(p90[run[k]] as number).toFixed(1)}`;
+            const i = run[k];
+            const value = upper[i];
+            if (value !== null) {
+              s += `L${x(i).toFixed(1)},${y(value).toFixed(1)}`;
+            }
           }
           d += `${s}Z`;
-          void b;
         }
         run = [];
       };
       for (let i = 0; i < n; i++) {
-        if (p10[i] !== null && p90[i] !== null) run.push(i);
+        if (lower[i] !== null && upper[i] !== null) run.push(i);
         else flush();
       }
       flush();
@@ -168,7 +184,8 @@ export function ForecastChart({
     const line = segPath(p50);
     const q10 = p10 ? segPath(p10) : "";
     const q90 = p90 ? segPath(p90) : "";
-    const band = bandPath();
+    const band = bandPath(p10, p90);
+    const innerBands = [bandPath(p20, p80), bandPath(p30, p70), bandPath(p40, p60)];
     const actualLine = segPath(actual);
     const area =
       !band && line
@@ -221,6 +238,7 @@ export function ForecastChart({
       line,
       area,
       band,
+      innerBands,
       q10,
       q90,
       actualLine,
@@ -234,7 +252,7 @@ export function ForecastChart({
       originLabel,
       showZero: lo < 0 && hi > 0,
     };
-  }, [size, timestamps, p50, p10, p90, actual]);
+  }, [size, timestamps, p50, p10, p20, p30, p40, p60, p70, p80, p90, actual]);
 
   if (size.w >= 80 && geom === null) {
     return (
@@ -475,6 +493,9 @@ export function ForecastChart({
               ) : null}
 
               {geom.band ? <path d={geom.band} fill="url(#band-grad)" /> : null}
+              {geom.innerBands.map((path, index) =>
+                path ? <path key={index} d={path} fill={hexToRgba(accent, 0.1 + index * 0.03)} /> : null,
+              )}
               {geom.q10 ? (
                 <path d={geom.q10} fill="none" stroke={qLine} strokeWidth={1.25} strokeDasharray="4 3" />
               ) : null}

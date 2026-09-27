@@ -11,7 +11,7 @@ import pandas as pd
 from delukit.core.config import products as config
 
 BERLIN = ZoneInfo("Europe/Berlin")
-QUANTILES = ("quantile_P10", "quantile_P50", "quantile_P90")
+QUANTILES = tuple(quantile.format() for quantile in config.QUANTILES)
 
 
 def expected_index(day: date, span: str) -> pd.DatetimeIndex:
@@ -33,7 +33,7 @@ def validate_product(path: Path, day: date, span: str) -> int:
     values = frame[list(QUANTILES)].to_numpy(dtype=float)
     if not all(math.isfinite(float(value)) for value in values.flat):
         raise ValueError(f"{path}: non-finite forecast quantile")
-    if not ((values[:, 0] <= values[:, 1]) & (values[:, 1] <= values[:, 2])).all():
+    if not (values[:, :-1] <= values[:, 1:]).all():
         raise ValueError(f"{path}: unordered forecast quantiles")
     return len(frame)
 
@@ -64,6 +64,12 @@ def publish(day: date, gate: str, run_dir: Path, products: list[dict]) -> Path:
         "published_at": datetime.now(UTC).isoformat(),
         "products": products,
     }
+    snapshot = run_dir / "features.parquet"
+    if snapshot.is_file():
+        manifest["input_snapshot"] = {
+            "path": str(snapshot.relative_to(run_dir.parent.parent)),
+            "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+        }
     destination = config.FORECAST_DIR / day.isoformat() / f"{gate}.json"
     temporary = destination.with_suffix(".tmp")
     temporary.write_text(json.dumps(manifest, separators=(",", ":")) + "\n")

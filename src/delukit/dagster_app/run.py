@@ -13,7 +13,7 @@ def _key(day: date, gate: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Materialize delukit assets once.")
-    parser.add_argument("action", choices=["sync", "forecast", "scores"])
+    parser.add_argument("action", choices=["sync", "forecast", "scores", "train"])
     parser.add_argument("--date", default=None, help="Berlin day YYYY-MM-DD")
     parser.add_argument("--gate", choices=["0530", "1130"], default="0530")
     args = parser.parse_args()
@@ -24,9 +24,9 @@ def main() -> None:
         else datetime.now(UTC).astimezone(defs.BERLIN).date()
     )
     if args.action == "sync":
-        dg.materialize([defs.raw_data, defs.clean_data, defs.versioned_data])
+        result = dg.materialize([defs.raw_data, defs.clean_data, defs.versioned_data])
     elif args.action == "forecast":
-        dg.materialize(
+        result = dg.materialize(
             [
                 defs.raw_data,
                 defs.clean_data,
@@ -35,8 +35,26 @@ def main() -> None:
             ],
             partition_key=_key(day, args.gate),
         )
+    elif args.action == "scores":
+        result = dg.materialize(
+            [
+                defs.raw_data,
+                defs.clean_data,
+                defs.versioned_data,
+                defs.daily_score_reconciliation,
+            ]
+        )
     else:
-        dg.materialize([defs.forecast_scores], partition_key=_key(day, args.gate))
+        result = dg.materialize(
+            [
+                defs.raw_data,
+                defs.clean_data,
+                defs.versioned_data,
+                defs.registered_models,
+            ]
+        )
+    if not result.success:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

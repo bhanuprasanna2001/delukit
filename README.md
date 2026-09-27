@@ -14,7 +14,7 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 [![React](https://img.shields.io/badge/UI-React_19-61DAFB?style=flat-square&logo=react)](delu/frontend/)
 [![Docker](https://img.shields.io/badge/run-docker_compose-2496ED?style=flat-square&logo=docker)](compose.yaml)
 
-[🚀 Quickstart](#-quickstart-60-seconds) ·
+[🚀 Quickstart](#-quickstart) ·
 [📊 What you get](#-what-you-get) ·
 [🔄 How it flows](#-how-it-flows) ·
 [⌨️ CLI](#️-cli) ·
@@ -25,9 +25,9 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 ---
 
 <p align="center">
-  <img src="public/delu.png" alt="DE-LU forecast chart with P10/P50/P90 bands and actuals" width="100%" />
+  <img src="public/delu.png" alt="DE-LU forecast chart with uncertainty bands and actuals" width="100%" />
   <br />
-  <sub>The app at <code>:8000</code> — P10/P50/P90 bands, actuals overlay, run-day stepper.</sub>
+  <sub>The app at <code>:8000</code> shows four uncertainty bands, P50, and actuals.</sub>
 </p>
 
 ## ✨ Why delukit
@@ -36,7 +36,7 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 - 🕰️ **Modeled gate cutoffs.** Every row has an assigned availability time
 - ⚡ **Two fresh forecasts a day** — full chain runs at 05:30 / 11:30 Berlin time
 - 📈 **1-day + 10-day horizons** — day-ahead precision meets 10-day planning
-- 📦 **One command to run** — `docker compose up --build` gives you app + pipeline
+- 📦 **Compose stack** — `docker compose up --build` starts the app and pipeline
 - 🔑 **API with keys & quotas** — anonymous exploration, keyed `/v1` for real use
 
 > Forecasts are model output, **not trading advice**.
@@ -45,19 +45,20 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 
 | Surface | Where | What |
 |---|---|---|
-| 📈 Forecast chart | `http://localhost:8000` | P10/P50/P90 bands, actuals, 05:30/11:30 toggle, D+1 / 10-day switch |
+| 📈 Forecast chart | `http://localhost:8000` | P10–P90 bands, P50 point forecast, actuals, 05:30/11:30 toggle |
 | 📥 Self-serve export | `/api/export` | CSV / Parquet / XLSX by range, horizon, timezone — verified login only |
 | 🔑 API + dashboard | `/v1/forecast` | Keyed endpoint (60/min, 5000/day), usage bar, in-app Swagger |
 | 🛠️ Pipeline UI | `http://localhost:3000` | Dagster asset graph, schedules, checks, retries |
 
-## 🚀 Quickstart — 60 seconds
+## 🚀 Quickstart
 
 ```bash
 cp .env.example .env  # add ENTSOE_API_KEY
-docker compose up --build
+docker compose up --build -d
+docker compose exec delukit python -m delukit.dagster_app.run train
 ```
 
-App → http://localhost:8000 · Pipeline → http://localhost:3000
+The training command registers the initial models. The next scheduled gate publishes forecasts. App → http://localhost:8000 · Pipeline → http://localhost:3000
 
 That's it. The only required key is `ENTSOE_API_KEY`.
 
@@ -72,18 +73,20 @@ flowchart LR
     R --> C[clean]
     C --> V[versioned\navailable_at]
     V --> G[Dagster gate at 05:30 / 11:30]
-    M[Existing model registry] --> G
+    M[MLflow active model versions] --> G
     G --> P[Validated gate manifest]
     P --> A[DELU API and web app]
-    P --> Q[Mature actual scoring]
-    C --> Q
+    C --> Q[Daily mature actual scoring]
+    P --> Q
+    V --> T[Weekly registered training]
+    T --> M
     Q --> D[Score drift monitor]
     G --> L[Fallback and failure alerts]
     D --> L
     L --> K[SQLite outbox and optional Slack]
 ```
 
-Raw provider payloads → quarter-hour clean tables → availability-stamped parts → model predictions → validated parquet and a gate manifest in `data/forecasts`. Plots are optional (`DELUKIT_WRITE_PLOTS=1`). Serving lives in [`delu/`](delu/README.md). One FastAPI process serves the UI and API. Each product records its model label; a missing registry model produces an `xgboost_unregistered` forecast and an alert instead of silently writing a new champion.
+Raw provider payloads become quarter-hour clean tables, availability-stamped parts, and forecasts published through a validated manifest in `data/forecasts`. Plots are optional (`DELUKIT_WRITE_PLOTS=1`). Serving lives in [`delu/`](delu/README.md). The gate records the exact active MLflow model version for each product and saves its input snapshot. If an active version is missing, publication fails and Dagster alerts.
 
 `available_at` applies configured publication times to retained values. ENTSO-E and SMARD refreshes replace each daily file, so historical replay uses the latest retained revision. It cannot reconstruct the value seen at an earlier gate. Weather retains separate model runs.
 
@@ -94,7 +97,8 @@ Raw provider payloads → quarter-hour clean tables → availability-stamped par
 | `delukit` | Sync ENTSO-E, SMARD, weather, calendar into `data/raw` |
 | `delukit-clean` | Raw → `data/clean/*.parquet` |
 | `delukit-dataset` | Clean → `data/versioned` + gate-replay validation (`--validate-only` to just check) |
-| `delukit-forecast` | Fit + predict both spans for one gate, e.g. `--gate 1130 [--date 2026-09-21]` |
+| `delukit-forecast` | Predict both spans from active registered models for one gate, e.g. `--gate 1130 [--date 2026-09-21]` |
+| `python -m delukit.dagster_app.run train` | Refresh data and train/register the initial models or retrain on demand |
 | `delukit-backtest` | Replay a product over history, score per lead day |
 | `delukit-tune` | Optuna-tune one product into `data/tuning/candidates` |
 
@@ -141,6 +145,7 @@ Python ≥3.12 with `uv`, Node 22.
 ```bash
 uv sync
 uv run delukit && uv run delukit-clean && uv run delukit-dataset
+uv run python -m delukit.dagster_app.run train
 uv run delukit-forecast --gate 1130
 ```
 
@@ -173,11 +178,14 @@ The command reports every selected result and exits nonzero if a check fails or 
 | Schedule | Runs |
 |---|---|
 | 🌅 05:30 + 11:30 daily | Full chain: sync → clean → versioned → both spans |
-| 🧮 15:30 daily | Reconcile complete lead-day scores for the preceding eleven issue dates |
+| 🧮 15:30 daily | Refresh actuals, reconcile complete lead-day scores, report to the alert outbox and optional Slack |
+| Sunday 17:00 | Refresh data, train, register, validate, and activate new model versions |
 
-Automatic retraining and tuning are disabled. The old registry callback compared candidate and incumbent on training data, and retained ENTSO-E/SMARD history does not preserve historical revisions. `delukit-tune` writes candidate settings only; `delukit-backtest --tuned` can explore them but is not promotion evidence. A future promotion job needs immutable source receipts, a forward holdout, champion comparison, and a reversible active-model pointer. Existing registry models are read for scheduled predictions, with local unregistered XGBoost or simpler fallback models when needed.
+Train once before the first forecast gate with `python -m delukit.dagster_app.run train`. OpenSTEF logs training runs and model artifacts. Delukit registers each fitted artifact as an MLflow model version and moves its `active` alias only after a load and forecast check. A failed product keeps its prior active version. Gates never fit an unregistered model. New publications contain P10 through P90; P50 is the point forecast. Older three-quantile publications remain readable.
 
-The versioned-data check blocks forecasts on failed validation. A gate becomes public only after every product has a complete, finite, ordered forecast grid. Failed source fetches fail the gate. Alerts for failed runs, missed publications, fallback models, and mature-score drift go to `data/ops/alerts.db` and optionally Slack. The 1.5× score-drift threshold is provisional and needs calibration against held-out history.
+Automatic tuning remains disabled. The current `delukit-tune` command writes exploratory candidate settings, but its training score and historical replay cannot justify automatic activation. ENTSO-E and SMARD overwrite source revisions. Gate input snapshots and logged training data now collect the evidence needed for future time-ordered tuning checks. Existing historical backtests still cannot reconstruct the source values originally received at past gates.
+
+The versioned-data check blocks forecasts on failed validation. A gate becomes public only after every product has a complete, finite, ordered forecast grid. Failed source fetches fail the gate. Alerts for failed runs, missed publications, fallback models, and mature-score drift go to `data/ops/alerts.db` and optionally Slack. The 1.5× score-drift threshold is provisional and needs calibration against live history.
 
 ## Remote deployment
 

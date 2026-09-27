@@ -276,6 +276,12 @@ export function Forecasts() {
               timestamps={data.timestamps}
               p50={data.p50}
               p10={data.p10}
+              p20={data.p20}
+              p30={data.p30}
+              p40={data.p40}
+              p60={data.p60}
+              p70={data.p70}
+              p80={data.p80}
               p90={data.p90}
               actual={data.actual}
               unit={unitFor(data.meta.target)}

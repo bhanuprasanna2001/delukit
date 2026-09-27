@@ -1,14 +1,69 @@
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from delukit.core.config.products import FORECAST_DIR, SCORES_DIR
+from delukit.core.config.products import FORECAST_DIR, SCORES_DIR, SPANS
 from delukit.ops.alerts import record
+from delukit.ops.publication import published_products
 
 BERLIN = ZoneInfo("Europe/Berlin")
 GATES = {"0530": time(5, 30), "1130": time(11, 30)}
+
+
+@dataclass(frozen=True)
+class DailyScoreReport:
+    scored: int
+    pending_mature: int
+    message: str
+
+
+def daily_score_report(as_of: date, rows: list[dict]) -> DailyScoreReport:
+    from delukit.evaluation.backtest import SCORE_LOOKBACK_DAYS
+
+    scored = {
+        (r["day"], r["gate"], r["span"], r["target"], r["lead_day"]) for r in rows
+    }
+    mature = set()
+    for age in range(1, SCORE_LOOKBACK_DAYS + 1):
+        day = as_of - timedelta(days=age)
+        for gate in GATES:
+            for span in SPANS:
+                lead_days = min(age - 1, 1 if span == "d1" else 10)
+                for target, _, _ in published_products(day, gate, span):
+                    mature.update(
+                        (day.isoformat(), gate, span, target, lead_day)
+                        for lead_day in range(1, lead_days + 1)
+                    )
+    pending = sorted(mature - scored)
+    lines = [
+        f"{as_of} forecast scores: {len(scored)} complete product/lead days; "
+        f"{len(pending)} past delivery days await complete actuals."
+    ]
+    latest = {}
+    for row in rows:
+        if row["gate"] == "1130" and row["span"] == "d1":
+            target = row["target"]
+            if target not in latest or row["day"] > latest[target]["day"]:
+                latest[target] = row
+    for target, row in sorted(latest.items()):
+        version = row.get("model_version")
+        used = f" v{version}" if version is not None else ""
+        lines.append(
+            f"{target} ({row['day']}{used}): "
+            f"rMAE {row['rmae']:.3f}, rCRPS {row['rcrps']:.3f}"
+        )
+    if pending:
+        preview = ", ".join(
+            f"{day} {gate} {span} {target} D+{lead}"
+            for day, gate, span, target, lead in pending[:3]
+        )
+        lines.append(f"Oldest pending: {preview}")
+    return DailyScoreReport(
+        scored=len(scored), pending_mature=len(pending), message="\n".join(lines)
+    )
 
 
 def check_gates(now: datetime, *, grace: timedelta = timedelta(minutes=90)) -> int:

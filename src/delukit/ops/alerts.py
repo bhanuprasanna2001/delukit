@@ -65,7 +65,10 @@ def deliver_pending() -> int:
             "SELECT id, key, active, message FROM events WHERE sent_at IS NULL ORDER BY id"
         ).fetchall()
         for event_id, condition, active, message in pending:
-            status = "ALERT" if active else "RECOVERED"
+            if condition.startswith("daily-report/"):
+                status = "REPORT"
+            else:
+                status = "ALERT" if active else "RECOVERED"
             payload = json.dumps(
                 {"text": f"*delukit {status}* `{condition}`\n{message}"}
             )

@@ -124,14 +124,15 @@ def test_api_lists_only_published_gate(tmp_dirs):
     assert forecasts._newest("2026-01-05", "0530", "d1", "load_actual_mw") == path
 
 
-def _write_forecast(fdir, target, day="2026-01-06", model="xgboost", n=96):
+def _write_forecast(
+    fdir, target, day="2026-01-06", model="xgboost", n=96, legacy=False
+):
     fdir.mkdir(parents=True, exist_ok=True)
     idx = pd.date_range(f"{day} 00:00", periods=n, freq="15min", tz="UTC")
+    levels = (10, 50, 90) if legacy else range(10, 100, 10)
     pd.DataFrame(
         {
-            "quantile_P10": [1.0] * n,
-            "quantile_P50": [2.0] * n,
-            "quantile_P90": [3.0] * n,
+            **{f"quantile_P{level}": [0.75 + level / 40] * n for level in levels},
             target: [2.0] * n,
         },
         index=idx,
@@ -163,8 +164,37 @@ def test_forecast_load_with_actuals(tmp_dirs, actuals):
     assert out["meta"]["model"] == "xgboost" and out["meta"]["rows"] >= 96
     assert len(out["p50"]) == len(out["timestamps"]) == len(out["actual"])
     assert out["p10"] is not None
+    first_forecast = next(i for i, value in enumerate(out["p50"]) if value is not None)
+    assert [out[f"p{level}"][first_forecast] for level in range(10, 100, 10)] == [
+        0.75 + level / 40 for level in range(10, 100, 10)
+    ]
     point = F.load("2026-01-05", "1130", "d1", "load_actual_mw", "point")
-    assert point["p10"] is None and point["p90"] is None
+    assert all(
+        point[f"p{level}"] is None for level in range(10, 100, 10) if level != 50
+    )
+
+
+def test_legacy_three_quantile_forecast_remains_readable(tmp_dirs, actuals):
+    from backend import forecasts as F
+
+    _write_forecast(
+        tmp_dirs["forecasts"] / "2026-01-05" / "1130_d1",
+        "load_actual_mw",
+        legacy=True,
+    )
+    result = F.load("2026-01-05", "1130", "d1", "load_actual_mw", "probabilistic")
+    first_forecast = next(
+        i for i, value in enumerate(result["p50"]) if value is not None
+    )
+    assert result["p10"][first_forecast] == 1.0
+    assert result["p20"] is None
+    assert result["p50"][first_forecast] == 2.0
+    assert result["p90"][first_forecast] == 3.0
+    exported = F.export_frame(
+        "2026-01-05", "2026-01-05", "load_actual_mw", "1130", "probabilistic", "UTC", 1
+    )
+    assert list(exported.columns[4:]) == [f"p{level}" for level in range(10, 100, 10)]
+    assert exported["p20"].isna().all()
 
 
 def test_export_frame_validation_and_file(tmp_dirs):
@@ -193,6 +223,13 @@ def test_export_frame_validation_and_file(tmp_dirs):
         "horizon_in_hours",
     ]
     assert "p50" in df.columns and "p10" not in df.columns
+    probabilistic = F.export_frame(
+        "2026-01-05", "2026-01-05", "load_actual_mw", "1130", "probabilistic", "UTC", 1
+    )
+    assert list(probabilistic.columns[4:]) == [
+        f"p{level}" for level in range(10, 100, 10)
+    ]
+    assert probabilistic["p20"].iloc[0] == 1.25
     name, media, data = F.export_file(
         "2026-01-05", "2026-01-05", "load_actual_mw", "1130", "point", "UTC", 1, "csv"
     )

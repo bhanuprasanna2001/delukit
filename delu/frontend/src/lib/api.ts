@@ -35,6 +35,12 @@ export interface ForecastData {
   timestamps: string[];
   p50: (number | null)[];
   p10: (number | null)[] | null;
+  p20: (number | null)[] | null;
+  p30: (number | null)[] | null;
+  p40: (number | null)[] | null;
+  p60: (number | null)[] | null;
+  p70: (number | null)[] | null;
+  p80: (number | null)[] | null;
   p90: (number | null)[] | null;
   actual: (number | null)[];
 }

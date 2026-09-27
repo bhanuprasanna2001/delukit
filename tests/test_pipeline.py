@@ -102,74 +102,6 @@ def test_workflow_config_horizons_and_excludes():
     assert "price_exaa_eur_mwh" not in day_cfg.selected_features.exclude
 
 
-def test_predict_with_fallback_degrades_and_reports(monkeypatch):
-    from openstef_core.exceptions import InsufficientlyCompleteError, PredictError
-
-    import delukit.models.forecast as F
-
-    calls = []
-
-    def fake_fit(target, gate, span, **kw):
-        calls.append(kw.get("model"))
-        raise InsufficientlyCompleteError("nope")
-
-    def fake_predict(workflow, target, gate, span, day):
-        raise AssertionError("should not reach predict when fit fails")
-
-    monkeypatch.setattr(F, "fit_product", fake_fit)
-    monkeypatch.setattr(F, "predict_product", fake_predict)
-    with pytest.raises(PredictError) as exc_info:
-        F.predict_with_fallback("t", "0530", "d1", date(2026, 1, 5))
-    assert "all models failed" in str(exc_info.value)
-    assert "xgboost" in str(exc_info.value)
-    assert calls[0] == "xgboost"
-
-
-def test_predict_with_fallback_uses_first_success(monkeypatch):
-    import delukit.models.forecast as F
-
-    sentinel = object()
-    monkeypatch.setattr(F, "fit_product", lambda *a, **k: "wf")
-    monkeypatch.setattr(F, "predict_product", lambda *a, **k: sentinel)
-    out, model = F.predict_with_fallback("t", "0530", "d1", date(2026, 1, 5))
-    assert out is sentinel and model == "xgboost"
-
-
-def test_missing_registry_model_stays_unregistered(monkeypatch):
-    from openstef_core.exceptions import ModelNotFoundError
-
-    import delukit.models.forecast as F
-
-    sentinel = object()
-    fit_kwargs = []
-    monkeypatch.setattr(F, "create_workflow", lambda *a, **k: "registry")
-
-    def fake_predict(workflow, *args, **kwargs):
-        if workflow == "registry":
-            raise ModelNotFoundError(model_id="missing")
-        return sentinel
-
-    def fake_fit(*args, **kwargs):
-        fit_kwargs.append(kwargs)
-        return "local"
-
-    monkeypatch.setattr(F, "predict_product", fake_predict)
-    monkeypatch.setattr(F, "fit_product", fake_fit)
-
-    out, model = F.predict_with_fallback(
-        "load_actual_mw", "0530", "d1", date(2026, 1, 5), registry=True
-    )
-    assert out is sentinel
-    assert model == "xgboost_unregistered"
-    assert fit_kwargs == [
-        {
-            "forecast_origin": F.gate_datetime(date(2026, 1, 5), "0530"),
-            "model": "xgboost",
-            "registry": False,
-        }
-    ]
-
-
 def test_fitting_and_prediction_share_forecast_origin(monkeypatch):
     import pandas as pd
     from openstef_core.datasets import (
@@ -221,16 +153,15 @@ def test_fitting_and_prediction_share_forecast_origin(monkeypatch):
     monkeypatch.setattr(F, "load", lambda: dataset)
     monkeypatch.setattr(F, "create_workflow", lambda *args, **kwargs: Workflow())
 
-    forecast, model = F.predict_with_fallback(
-        "target", "0530", "d1", day, models=("xgboost",)
-    )
+    workflow = F.fit_product("target", "0530", "d1", forecast_origin=origin)
+    assert workflow is not None
+    forecast = F.predict_product(workflow, "d1", forecast_origin=origin)
 
     assert captured == {
         "fit": [1.0, 2.0],
         "predict": [1.0, 2.0],
         "forecast_start": origin,
     }
-    assert model == "xgboost"
     assert forecast.forecast_start == origin
 
 
@@ -329,6 +260,40 @@ def test_dagster_partition_and_expected_rows():
     assert len(expected_index(date(2026, 1, 5), "d1")) == 96
     assert len(expected_index(date(2026, 1, 5), "d10")) == 960
     assert len(expected_index(date(2026, 3, 28), "d1")) == 92
+
+
+def test_daily_score_schedule_refreshes_sources_before_scoring():
+    from delukit.dagster_app.definitions import defs
+
+    job = next(
+        job
+        for job in defs.resolve_all_job_defs()
+        if job.name == "__anonymous_asset_job_scores_schedule"
+    )
+    assert {key.to_user_string() for key in job.asset_layer.selected_asset_keys} == {
+        "raw_data",
+        "clean_data",
+        "versioned_data",
+        "daily_score_reconciliation",
+    }
+
+
+def test_weekly_retraining_refreshes_sources_before_training():
+    from delukit.dagster_app.definitions import defs, retrain_schedule
+
+    assert retrain_schedule.cron_schedule == "0 17 * * 0"
+    assert retrain_schedule.execution_timezone == "Europe/Berlin"
+    job = next(
+        job
+        for job in defs.resolve_all_job_defs()
+        if job.name == "__anonymous_asset_job_retrain_schedule"
+    )
+    assert {key.to_user_string() for key in job.asset_layer.selected_asset_keys} == {
+        "raw_data",
+        "clean_data",
+        "versioned_data",
+        "registered_models",
+    }
 
 
 def test_ops_failure_alert_never_raises(monkeypatch, tmp_path):

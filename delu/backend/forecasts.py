@@ -19,7 +19,8 @@ EXPORT_TIMEZONES = ("Europe/Berlin", "UTC")
 EXPORT_FORMATS = ("csv", "parquet", "xlsx")
 EXPORT_KINDS = ("point", "probabilistic")
 MAX_EXPORT_DAYS = 75
-EXPORT_COLS = {"p10": "quantile_P10", "p50": "quantile_P50", "p90": "quantile_P90"}
+PERCENTILES = tuple(range(10, 100, 10))
+EXPORT_COLS = {f"p{level}": f"quantile_P{level}" for level in PERCENTILES}
 
 ENTSOE_TARGETS = ("price_sdac_seq1_eur_mwh", "load_actual_mw")
 SMARD_TARGETS = (
@@ -227,7 +228,7 @@ def export_frame(
         raise Missing("No forecasts in that date range.")
 
     zone = ZoneInfo(tz)
-    cols = ["p50"] if kind == "point" else ["p10", "p50", "p90"]
+    cols = ["p50"] if kind == "point" else list(EXPORT_COLS)
     span = "d1" if horizon_days <= 1 else "d10"
     parts = []
     for day in days:
@@ -263,6 +264,9 @@ def export_frame(
             "horizon_in_hours": [round(float(v), 2) for v in hours[keep]],
         }
         for c in cols:
+            if EXPORT_COLS[c] not in sub.columns:
+                data[c] = [None] * len(sub)
+                continue
             values = _series_column(sub, EXPORT_COLS[c])
             data[c] = [None if pd.isna(v) else float(v) for v in values]
         parts.append(pd.DataFrame(data))
@@ -327,6 +331,8 @@ def load(day: str, gate: str, span: str, target: str, kind: str) -> dict:
         actual = pd.Series(dtype="float64").reindex(idx)
 
     def qt(c):
+        if c not in frame.columns:
+            return None
         return [None if pd.isna(v) else float(v) for v in frame[c]]
 
     def av(s):
@@ -346,8 +352,13 @@ def load(day: str, gate: str, span: str, target: str, kind: str) -> dict:
         },
         "timestamps": [t.isoformat() for t in idx],
         "p50": qt("quantile_P50"),
-        "p10": qt("quantile_P10") if kind == "probabilistic" else None,
-        "p90": qt("quantile_P90") if kind == "probabilistic" else None,
-        "actual": av(actual),
     }
+    out.update(
+        {
+            column: qt(source) if kind == "probabilistic" else None
+            for column, source in EXPORT_COLS.items()
+            if column != "p50"
+        }
+    )
+    out["actual"] = av(actual)
     return out

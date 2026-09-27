@@ -90,7 +90,7 @@ def _forecast_partition(context: dg.AssetExecutionContext) -> dg.MaterializeResu
     from delukit.ops.monitor import report_fallbacks
 
     day, gate = _partition_day_gate(context.partition_key)
-    products = run_gate(day, gate, TARGETS, registry=True)
+    products = run_gate(day, gate, TARGETS)
     report_fallbacks(day, gate, products)
     try:
         deliver_pending()
@@ -118,44 +118,50 @@ def forecast_gate(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
 
 @dg.asset(
-    partitions_def=gate_partitions,
-    deps=[forecast_gate],
+    deps=[versioned_data],
     retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
-    backfill_policy=dg.BackfillPolicy.multi_run(),
-    description="Daily errors of stored forecasts vs arrived actuals.",
+    description="Refresh actuals and reconcile complete delivery-day scores.",
 )
-def forecast_scores(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
-    from delukit.evaluation.backtest import score_gate
-
-    day, gate = _partition_day_gate(context.partition_key)
-    rows = score_gate(day, gate)
-    mean_rmae = sum(r["rmae"] for r in rows) / len(rows) if rows else float("nan")
-    return dg.MaterializeResult(
-        metadata={"product_lead_days_scored": len(rows), "mean_rmae": mean_rmae}
-    )
-
-
-@dg.op(description="Rescore the previous eleven issue days as actuals mature.")
-def reconcile_scores(context: dg.OpExecutionContext) -> dict:
+def daily_score_reconciliation(
+    context: dg.AssetExecutionContext,
+) -> dg.MaterializeResult:
     from delukit.evaluation.backtest import score_recent
     from delukit.ops.alerts import deliver_pending, record
-    from delukit.ops.monitor import score_drift
+    from delukit.ops.monitor import daily_score_report, score_drift
 
     day = datetime.now(BERLIN).date()
     rows = score_recent(day)
+    report = daily_score_report(day, rows)
     for condition, active, message in score_drift():
         record(condition, active, message)
+    record(f"daily-report/{day}", True, report.message)
     try:
         deliver_pending()
     except OSError as exc:
         context.log.warning("alert delivery failed: %s", exc)
-    context.log.info("reconciled %d complete lead-day scores", len(rows))
-    return {"scores": len(rows)}
+    context.log.info("%s", report.message)
+    return dg.MaterializeResult(
+        metadata={
+            "scored": report.scored,
+            "pending_mature": report.pending_mature,
+            "report": report.message,
+        }
+    )
 
 
-@dg.job(name="daily_score_reconciliation")
-def reconcile_job() -> None:
-    reconcile_scores()
+@dg.asset(
+    deps=[versioned_data],
+    retry_policy=dg.RetryPolicy(max_retries=1, delay=300),
+    description="Train, register, and activate models after source and dataset refresh.",
+)
+def registered_models(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    from delukit.data.dataset import validate
+    from delukit.models.registry import train_all
+
+    if validate() != 0:
+        raise ValueError("Versioned data failed validation before retraining.")
+    products = train_all(datetime.now(UTC))
+    return dg.MaterializeResult(metadata={"registered_products": len(products)})
 
 
 @dg.schedule(
@@ -175,9 +181,19 @@ def gate_schedule(context: dg.ScheduleEvaluationContext) -> list[dg.RunRequest]:
     cron_schedule="30 15 * * *",
     execution_timezone="Europe/Berlin",
     default_status=dg.DefaultScheduleStatus.RUNNING,
-    target=reconcile_job,
+    target=dg.AssetSelection.assets(daily_score_reconciliation).upstream(),
 )
 def scores_schedule() -> dg.RunRequest:
+    return dg.RunRequest()
+
+
+@dg.schedule(
+    cron_schedule="0 17 * * 0",
+    execution_timezone="Europe/Berlin",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+    target=dg.AssetSelection.assets(registered_models).upstream(),
+)
+def retrain_schedule() -> dg.RunRequest:
     return dg.RunRequest()
 
 
@@ -222,10 +238,10 @@ defs = dg.Definitions(
         clean_data,
         versioned_data,
         forecast_gate,
-        forecast_scores,
+        daily_score_reconciliation,
+        registered_models,
     ],
     asset_checks=[versioned_data_valid],
-    schedules=[gate_schedule, scores_schedule],
-    jobs=[reconcile_job],
+    schedules=[gate_schedule, scores_schedule, retrain_schedule],
     sensors=[ops_failure_alert, gate_health],
 )

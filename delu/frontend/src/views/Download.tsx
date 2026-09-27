@@ -226,7 +226,7 @@ export function Download({
             <Field
               id="dl-kind"
               label="Forecast Type"
-              hint={kind === "point" ? "One median column: p50." : "Three quantile columns: p10, p50, p90."}
+              hint={kind === "point" ? "One median column: p50." : "Nine quantile columns: p10 through p90."}
             >
               <Select id="dl-kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="point">Point Forecast</option>

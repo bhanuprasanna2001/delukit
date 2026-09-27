@@ -9,13 +9,7 @@ from openstef_beam.evaluation.metric_providers import (
     R2Provider,
     RCRPSProvider,
 )
-from openstef_core.datasets import ForecastDataset
-from openstef_core.exceptions import (
-    FlatlinerDetectedError,
-    InsufficientlyCompleteError,
-    ModelNotFoundError,
-    PredictError,
-)
+from openstef_core.datasets import ForecastDataset, TimeSeriesDataset
 from openstef_models.presets import (
     ForecastingWorkflowConfig,
     create_forecasting_workflow,
@@ -43,6 +37,7 @@ from delukit.core.config.products import (
     PREDICT_LENGTH,
     QUANTILES,
     SPAN_D1,
+    SPAN_D10,
     SPANS,
     TARGETS,
     TUNING_DIR,
@@ -252,67 +247,25 @@ def predict_product(
     span: str,
     *,
     forecast_origin: datetime,
+    data: TimeSeriesDataset | None = None,
 ) -> ForecastDataset:
-    data = (
-        load()
-        .filter_by_range(
+    if data is None:
+        data = (
+            load()
+            .filter_by_range(
+                forecast_origin - PREDICT_CONTEXT,
+                forecast_origin + PREDICT_LENGTH[span],
+            )
+            .filter_by_available_before(forecast_origin)
+            .select_version()
+        )
+    else:
+        data = data.filter_by_range(
             forecast_origin - PREDICT_CONTEXT,
             forecast_origin + PREDICT_LENGTH[span],
         )
-        .filter_by_available_before(forecast_origin)
-        .select_version()
-    )
     day = forecast_origin.astimezone(BERLIN).date()
     return slice_span(workflow.predict(data, forecast_start=forecast_origin), day, span)
-
-
-def predict_with_fallback(
-    target: str,
-    gate: str,
-    span: str,
-    day: date,
-    *,
-    registry: bool = False,
-    models: tuple[str, ...] = (PRIMARY_MODEL, *FALLBACK_MODELS),
-) -> tuple[ForecastDataset, str]:
-    forecast_origin = gate_datetime(day, gate)
-    tried = []
-    for model in models:
-        try:
-            registry_missing = False
-            if model == PRIMARY_MODEL and registry:
-                workflow = create_workflow(target, gate, span, registry=True)
-                try:
-                    return (
-                        predict_product(
-                            workflow, span, forecast_origin=forecast_origin
-                        ),
-                        model,
-                    )
-                except ModelNotFoundError:
-                    registry_missing = True
-            workflow = fit_product(
-                target,
-                gate,
-                span,
-                forecast_origin=forecast_origin,
-                model=model,
-                registry=False,
-            )
-            if workflow is None:
-                raise ModelNotFoundError(model_id=model_id(target, gate, span))
-            return (
-                predict_product(workflow, span, forecast_origin=forecast_origin),
-                "xgboost_unregistered" if registry_missing else model,
-            )
-        except (
-            FlatlinerDetectedError,
-            InsufficientlyCompleteError,
-            PredictError,
-            ModelNotFoundError,
-        ) as e:
-            tried.append(f"{model} ({type(e).__name__})")
-    raise PredictError(f"all models failed for {target} {gate} {span} {day}: {tried}")
 
 
 def infer_gate(now: datetime | None = None) -> tuple[date, str]:
@@ -362,23 +315,50 @@ def write_gate_plots(
             print(f"plot {day} {gate} {s} {target} -> {target}__{used}.html")
 
 
-def run_gate(
-    day: date, gate: str, targets: tuple[str, ...], *, registry: bool
-) -> list[dict]:
+def run_gate(day: date, gate: str, targets: tuple[str, ...]) -> list[dict]:
     import os
 
+    from delukit.models.registry import load_active
+
+    selected = {
+        (span, target): load_active(target, gate, span)
+        for span in SPANS
+        for target in targets
+    }
+    origin = gate_datetime(day, gate)
+    input_data = (
+        load()
+        .filter_by_range(
+            origin - PREDICT_CONTEXT,
+            origin + PREDICT_LENGTH[SPAN_D10],
+        )
+        .filter_by_available_before(origin)
+        .select_version()
+    )
+
     run_dir = begin_run(day, gate)
+    input_data.to_parquet(run_dir / "features.parquet")
     products = []
     for span in SPANS:
         outdir = run_dir / span
         outdir.mkdir()
         for target in targets:
-            forecast, used = predict_with_fallback(
-                target, gate, span, day, registry=registry
+            registered = selected[(span, target)]
+            forecast = predict_product(
+                registered.workflow, span, forecast_origin=origin, data=input_data
             )
+            used = registered.model_type
             path = outdir / f"{target}__{used}.parquet"
             forecast.to_parquet(path)
-            products.append({"span": span, "target": target, "model": used})
+            products.append(
+                {
+                    "span": span,
+                    "target": target,
+                    "model": used,
+                    "model_version": registered.version,
+                    "model_run_id": registered.run_id,
+                }
+            )
             print(
                 f"forecast {day} {gate} {span} {target}: {used}, {len(forecast.data)} rows -> {path}"
             )
@@ -393,14 +373,11 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Forecast one gate (fit + predict + fallback)."
+        description="Forecast one gate with active registered models."
     )
     parser.add_argument("--gate", choices=sorted(GATE_WALL), default=None)
     parser.add_argument(
         "--date", default=None, help="Berlin day YYYY-MM-DD (default: inferred)"
-    )
-    parser.add_argument(
-        "--no-registry", action="store_true", help="skip the MLflow model registry"
     )
     args = parser.parse_args()
 
@@ -412,12 +389,7 @@ def main() -> None:
             args.gate,
         )
     )
-    run_gate(
-        day,
-        gate,
-        TARGETS,
-        registry=not args.no_registry,
-    )
+    run_gate(day, gate, TARGETS)
 
 
 if __name__ == "__main__":
