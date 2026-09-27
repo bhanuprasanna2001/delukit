@@ -156,6 +156,43 @@ def test_forecast_options_resolve_newest(tmp_dirs):
     )
 
 
+def test_options_preserve_historical_1130_products_and_resolve_by_target(tmp_dirs):
+    from backend import forecasts as F
+
+    def publish(day, gate, products):
+        day_dir = tmp_dirs["forecasts"] / day
+        items = []
+        for span, target in products:
+            folder = day_dir / ".runs" / f"{gate}-run" / span
+            _write_forecast(folder, target)
+            path = folder / f"{target}__xgboost.parquet"
+            items.append(
+                {"span": span, "target": target, "path": str(path.relative_to(day_dir))}
+            )
+        (day_dir / f"{gate}.json").write_text(
+            json.dumps({"schema": 1, "day": day, "gate": gate, "products": items})
+        )
+
+    load = "load_actual_mw"
+    price = "price_sdac_seq1_eur_mwh"
+    publish("2026-01-05", "1130", (("d1", load), ("d10", load)))
+    publish("2026-01-06", "0530", (("d1", load), ("d10", load)))
+    publish("2026-01-06", "1130", (("d1", price), ("d10", price)))
+    publish("2026-01-07", "1130", (("d1", price),))
+
+    opts = F.options()
+    assert opts["products"]["2026-01-05"]["1130"]["d10"] == [load]
+    assert opts["products"]["2026-01-06"]["1130"]["d1"] == [price]
+    assert opts["runs"]["2026-01-07"] == {"d1": ["1130"]}
+    assert F.resolve(None, None, "d1", load) == ("2026-01-06", "0530")
+    assert F.resolve(None, None, "d10", price) == ("2026-01-06", "1130")
+    assert F.resolve("2026-01-05", "1130", "d10", load) == ("2026-01-05", "1130")
+    with pytest.raises(F.Missing, match="No d1 forecast for load_actual_mw"):
+        F.resolve("2026-01-06", "1130", "d1", load)
+    with pytest.raises(F.Missing, match="No d10 forecast"):
+        F.resolve("2026-01-07", None, "d10", price)
+
+
 def test_forecast_load_with_actuals(tmp_dirs, actuals):
     from backend import forecasts as F
 
@@ -394,6 +431,7 @@ def test_app_v1_quota_and_export(tmp_dirs, monkeypatch, actuals):
         uid = cx.execute("SELECT id FROM users WHERE email='u@x.co'").fetchone()["id"]
     _, raw = keys.issue(uid)
     _write_forecast(tmp_dirs["forecasts"] / "2026-01-05" / "1130_d1", "load_actual_mw")
+    _write_forecast(tmp_dirs["forecasts"] / "2026-01-05" / "0530_d1", "load_actual_mw")
     r = c.get("/v1/forecast", headers={"X-API-Key": raw})
     assert r.status_code == 200 and r.headers["X-RateLimit-Day"] == str(keys.DAY_LIMIT)
     kid = keys.lookup(raw)["id"]
@@ -401,12 +439,11 @@ def test_app_v1_quota_and_export(tmp_dirs, monkeypatch, actuals):
         if not keys.check_and_hit(kid)[0]:
             break
     assert c.get("/v1/forecast", headers={"X-API-Key": raw}).status_code == 429
-    assert (
-        c.get(
-            "/api/export", params={"start": "2026-01-05", "end": "2026-01-05"}
-        ).status_code
-        == 200
-    )
+    exported = c.get("/api/export", params={"start": "2026-01-05", "end": "2026-01-05"})
+    assert exported.status_code == 200
+    assert pd.read_csv(io.BytesIO(exported.content))[
+        "origin_time"
+    ].unique().tolist() == ["05:30"]
 
 
 def test_app_auth_enumeration_and_contact_throttle(tmp_dirs, monkeypatch):

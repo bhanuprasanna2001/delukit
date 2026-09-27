@@ -56,7 +56,7 @@ docker compose -f compose.prod.yaml exec -T delukit-daemon dagster schedule list
 docker compose -f compose.prod.yaml exec -T delukit-daemon dagster sensor list -m delukit.dagster_app.definitions
 ```
 
-The health endpoint confirms that the API process responds. Check `/api/options` for the available forecast dates and inspect `data/forecasts/YYYY-MM-DD/0530.json` or `1130.json` after the next scheduled gate. A manifest appears only after all 12 products pass validation. The first gate may take longer on 2 OCPUs; measure the run duration on the VM before relying on the scheduled issue times.
+The health endpoint confirms that the API process responds. Check `/api/options` for the available forecast dates and inspect `data/forecasts/YYYY-MM-DD/0530.json` or `1130.json` after the next scheduled gate. A manifest appears only after all configured products pass validation: 12 at 05:30 or two price products at 11:30. The first gate may take longer on 2 OCPUs; measure the run duration on the VM before relying on the scheduled issue times.
 
 To open Dagster privately, forward its loopback port over SSH and visit `http://localhost:3000`.
 

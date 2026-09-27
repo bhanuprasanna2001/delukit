@@ -84,13 +84,12 @@ def versioned_data_valid() -> dg.AssetCheckResult:
 
 
 def _forecast_partition(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
-    from delukit.core.config.products import TARGETS
     from delukit.models.forecast import run_gate
     from delukit.ops.alerts import deliver_pending
     from delukit.ops.monitor import report_fallbacks
 
     day, gate = _partition_day_gate(context.partition_key)
-    products = run_gate(day, gate, TARGETS)
+    products = run_gate(day, gate)
     report_fallbacks(day, gate, products)
     try:
         deliver_pending()
@@ -111,7 +110,7 @@ def _forecast_partition(context: dg.AssetExecutionContext) -> dg.MaterializeResu
     deps=[versioned_data],
     retry_policy=dg.RetryPolicy(max_retries=2, delay=60),
     backfill_policy=dg.BackfillPolicy.multi_run(),
-    description="Both spans and every target, published after full validation.",
+    description="Configured products for each gate, published after full validation.",
 )
 def forecast_gate(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     return _forecast_partition(context)

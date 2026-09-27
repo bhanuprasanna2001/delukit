@@ -12,7 +12,7 @@ const MAX_GAP = 75;
 const STEPS_PER_DAY = 96;
 
 const GATE_INFO =
-  "Two model runs a day. 05:30 runs before the morning auctions. 11:30 sees the EXAA results and the ENTSO-E day-ahead load forecast, so its day-ahead read is cleaner.";
+  "05:30 publishes all six forecast quantities for both horizons. 11:30 publishes price forecasts for both horizons using the later modeled input cutoff. Older runs remain available where published.";
 
 const FORMAT_HINTS: Record<string, string> = {
   xlsx: "Excel workbook, one sheet.",
@@ -91,14 +91,23 @@ export function Download({
     const dayCount = contiguous ? gap + 1 : 0;
     const overLimit = gap > MAX_GAP;
     const h = Math.max(1, Number.parseInt(horizon, 10) || 1);
+    const availableGates = opts?.gates.filter((candidate) =>
+      contiguous && dates.slice(si, ei + 1).every((day) => {
+        const products = opts.products[day]?.[candidate];
+        return h === 1
+          ? products?.d1?.includes(target) || products?.d10?.includes(target)
+          : products?.d10?.includes(target);
+      }),
+    ) ?? [];
+    const selectedGate = availableGates.includes(gate) ? gate : availableGates[0] ?? "0530";
     const rows = dayCount > 0 ? dayCount * h * STEPS_PER_DAY : 0;
     const overlapping = h > 1;
-    const runLabel = gate === "0530" ? "05:30 Europe/Berlin" : "11:30 Europe/Berlin";
+    const runLabel = selectedGate === "0530" ? "05:30 Europe/Berlin" : "11:30 Europe/Berlin";
     const fileName =
       start && end
-        ? `delu_${target}_${start}_${end}_${gate}_${kind}_h${h}d.${format}`
+        ? `delu_${target}_${start}_${end}_${selectedGate}_${kind}_h${h}d.${format}`
         : `delu_export.${format}`;
-    return { dates, contiguous, gap, dayCount, overLimit, h, rows, overlapping, runLabel, fileName };
+    return { dates, contiguous, gap, dayCount, overLimit, h, rows, overlapping, runLabel, fileName, availableGates, selectedGate };
   }, [opts, start, end, horizon, gate, target, kind, format]);
 
   function applyPreset(days: number) {
@@ -116,7 +125,7 @@ export function Download({
         start,
         end,
         target,
-        gate,
+        gate: derived.selectedGate,
         kind,
         tz,
         horizon_days: horizon,
@@ -195,7 +204,7 @@ export function Download({
   }
 
   const canDownload =
-    !pending && accepted && !!start && !!end && derived.contiguous && !derived.overLimit;
+    !pending && accepted && !!start && !!end && derived.contiguous && !derived.overLimit && derived.availableGates.length > 0;
 
   return (
     <div className="grid gap-4">
@@ -344,9 +353,9 @@ export function Download({
                 />
               }
             >
-              <Select id="dl-gate" name="gate" value={gate} onChange={(e) => setGate(e.target.value)}>
-                <option value="0530">05:30 Europe/Berlin</option>
-                <option value="1130">11:30 Europe/Berlin</option>
+              <Select id="dl-gate" name="gate" value={derived.selectedGate} onChange={(e) => setGate(e.target.value)}>
+                <option value="0530" disabled={!derived.availableGates.includes("0530")}>05:30 Europe/Berlin</option>
+                <option value="1130" disabled={!derived.availableGates.includes("1130")}>11:30 Europe/Berlin</option>
               </Select>
             </Field>
             <Field

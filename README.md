@@ -6,7 +6,7 @@
 
 **Day-ahead & 10-day power forecasts for the DE-LU zone — load, solar, wind, generation, price.**
 
-Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
+All quantities at **05:30**, price again at **11:30** Berlin time · served as chart, API & export
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square&logo=python)](pyproject.toml)
 [![Dagster](https://img.shields.io/badge/orchestrated_with-dagster-1C3D5A?style=flat-square)](src/delukit/dagster_app/)
@@ -38,9 +38,9 @@ Rebuilt at **05:30** and **11:30** Berlin time · served as chart, API & export
 
 ## ✨ Why delukit
 
-- 🔮 **24 forecast products** — 6 targets × 2 gates × 2 spans, with XGBoost where a usable model exists
+- 🔮 **14 daily forecast products** — 6 targets × 2 spans at 05:30, plus price × 2 spans at 11:30
 - 🕰️ **Modeled gate cutoffs.** Every row has an assigned availability time
-- ⚡ **Two fresh forecasts a day** — full chain runs at 05:30 / 11:30 Berlin time
+- ⚡ **Two gate runs a day** — the data chain refreshes at 05:30 / 11:30 Berlin time; only price is forecast again at 11:30
 - 📈 **1-day + 10-day horizons** — day-ahead precision meets 10-day planning
 - 📦 **Compose stack** — `docker compose up --build` starts the app and pipeline
 - 🔑 **API with keys & quotas** — anonymous exploration, keyed `/v1` for real use
@@ -103,7 +103,7 @@ Raw provider payloads become quarter-hour clean tables, availability-stamped par
 | `delukit` | Sync ENTSO-E, SMARD, weather, calendar into `data/raw` |
 | `delukit-clean` | Raw → `data/clean/*.parquet` |
 | `delukit-dataset` | Clean → `data/versioned` + gate-replay validation (`--validate-only` to just check) |
-| `delukit-forecast` | Predict both spans from active registered models for one gate, e.g. `--gate 1130 [--date 2026-09-21]` |
+| `delukit-forecast` | Predict the configured products for one gate, e.g. `--gate 1130 [--date 2026-09-21]` forecasts price for both spans |
 | `python -m delukit.dagster_app.run train` | Refresh data and train/register the initial models or retrain on demand |
 | `delukit-backtest` | Replay a product over history, score per lead day |
 | `delukit-tune` | Optuna-tune one product into `data/tuning/candidates` |
@@ -120,7 +120,7 @@ curl -H 'X-API-Key: delu_live_...' \
 
 # export — verified login, cookies included
 curl -b cookies.txt \
-  'localhost:8000/api/export?start=2026-09-01&end=2026-09-15&target=load_actual_mw&gate=1130&kind=point&tz=Europe/Berlin&horizon_days=1&format=csv' -o export.csv
+  'localhost:8000/api/export?start=2026-09-01&end=2026-09-15&target=load_actual_mw&gate=0530&kind=point&tz=Europe/Berlin&horizon_days=1&format=csv' -o export.csv
 ```
 
 Full reference in [`delu/README`](delu/README.md).
@@ -152,6 +152,7 @@ Python ≥3.12 with `uv`, Node 22.
 uv sync
 uv run delukit && uv run delukit-clean && uv run delukit-dataset
 uv run python -m delukit.dagster_app.run train
+uv run delukit-forecast --gate 0530
 uv run delukit-forecast --gate 1130
 ```
 
@@ -183,7 +184,8 @@ The command reports every selected result and exits nonzero if a check fails or 
 
 | Schedule | Runs |
 |---|---|
-| 🌅 05:30 + 11:30 daily | Full chain: sync → clean → versioned → both spans |
+| 🌅 05:30 daily | Sync → clean → versioned → all six targets for both spans |
+| 🕦 11:30 daily | Refresh data and publish price for both spans |
 | 🧮 15:30 daily | Refresh actuals, reconcile complete lead-day scores, report to the alert outbox and optional Slack |
 | Sunday 17:00 | Refresh data, train, register, validate, and activate new model versions |
 

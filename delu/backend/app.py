@@ -242,7 +242,7 @@ def api_export(
     start: str,
     end: str,
     target: str = "load_actual_mw",
-    gate: str = "1130",
+    gate: str = "0530",
     kind: str = "point",
     tz: str = "Europe/Berlin",
     horizon_days: int = 1,

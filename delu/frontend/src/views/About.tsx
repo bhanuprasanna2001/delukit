@@ -13,7 +13,7 @@ const CARDS = [
   {
     icon: Clock,
     title: "Two runs a day",
-    body: "The 05:30 run lands before the morning auctions. The 11:30 run additionally sees the EXAA results and the ENTSO-E day-ahead load forecast, so its day-ahead read is cleaner.",
+    body: "The 05:30 run publishes all six quantities for both horizons. The 11:30 run publishes price for both horizons with a later modeled input cutoff. Historical runs remain available.",
   },
   {
     icon: Database,
@@ -38,8 +38,8 @@ export function About({ go }: { go: (v: View) => void }) {
       <p className="max-w-2xl text-base leading-relaxed text-ink-soft">
         DELU publishes day-ahead and 10-day point and probabilistic forecasts
         for the German–Luxembourgian bidding zone — load, solar, onshore and
-        offshore wind, total generation, and the day-ahead price — rebuilt
-        twice daily by a gradient-boosted model.
+        offshore wind, total generation, and the day-ahead price. All six
+        quantities run at 05:30. Price runs again at 11:30.
       </p>
 
       <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">

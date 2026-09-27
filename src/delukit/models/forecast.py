@@ -35,11 +35,11 @@ from delukit.core.config.products import (
     N_JOBS,
     PREDICT_CONTEXT,
     PREDICT_LENGTH,
+    PRODUCTS_BY_GATE,
     QUANTILES,
     SPAN_D1,
     SPAN_D10,
     SPANS,
-    TARGETS,
     TUNING_DIR,
     energy_price_column,
     feature_exclude,
@@ -315,15 +315,14 @@ def write_gate_plots(
             print(f"plot {day} {gate} {s} {target} -> {target}__{used}.html")
 
 
-def run_gate(day: date, gate: str, targets: tuple[str, ...]) -> list[dict]:
+def run_gate(day: date, gate: str) -> list[dict]:
     import os
 
     from delukit.models.registry import load_active
 
     selected = {
         (span, target): load_active(target, gate, span)
-        for span in SPANS
-        for target in targets
+        for span, target in PRODUCTS_BY_GATE[gate]
     }
     origin = gate_datetime(day, gate)
     input_data = (
@@ -339,31 +338,30 @@ def run_gate(day: date, gate: str, targets: tuple[str, ...]) -> list[dict]:
     run_dir = begin_run(day, gate)
     input_data.to_parquet(run_dir / "features.parquet")
     products = []
-    for span in SPANS:
+    for span, target in PRODUCTS_BY_GATE[gate]:
         outdir = run_dir / span
-        outdir.mkdir()
-        for target in targets:
-            registered = selected[(span, target)]
-            forecast = predict_product(
-                registered.workflow, span, forecast_origin=origin, data=input_data
-            )
-            used = registered.model_type
-            path = outdir / f"{target}__{used}.parquet"
-            forecast.to_parquet(path)
-            products.append(
-                {
-                    "span": span,
-                    "target": target,
-                    "model": used,
-                    "model_version": registered.version,
-                    "model_run_id": registered.run_id,
-                }
-            )
-            print(
-                f"forecast {day} {gate} {span} {target}: {used}, {len(forecast.data)} rows -> {path}"
-            )
-        if os.getenv("DELUKIT_WRITE_PLOTS") == "1":
-            write_gate_plots(day, gate, span, root=run_dir)
+        outdir.mkdir(exist_ok=True)
+        registered = selected[(span, target)]
+        forecast = predict_product(
+            registered.workflow, span, forecast_origin=origin, data=input_data
+        )
+        used = registered.model_type
+        path = outdir / f"{target}__{used}.parquet"
+        forecast.to_parquet(path)
+        products.append(
+            {
+                "span": span,
+                "target": target,
+                "model": used,
+                "model_version": registered.version,
+                "model_run_id": registered.run_id,
+            }
+        )
+        print(
+            f"forecast {day} {gate} {span} {target}: {used}, {len(forecast.data)} rows -> {path}"
+        )
+    if os.getenv("DELUKIT_WRITE_PLOTS") == "1":
+        write_gate_plots(day, gate, root=run_dir)
     manifest = publish(day, gate, run_dir, products)
     print(f"published {day} {gate} -> {manifest}")
     return products
@@ -389,7 +387,7 @@ def main() -> None:
             args.gate,
         )
     )
-    run_gate(day, gate, TARGETS)
+    run_gate(day, gate)
 
 
 if __name__ == "__main__":

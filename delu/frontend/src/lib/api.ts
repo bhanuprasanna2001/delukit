@@ -18,6 +18,7 @@ export interface Options {
   spans: string[];
   targets: string[];
   runs: Record<string, Record<string, string[]>>;
+  products: Record<string, Record<string, Record<string, string[]>>>;
 }
 
 export interface ForecastMeta {

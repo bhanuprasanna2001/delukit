@@ -186,8 +186,8 @@ export function Terms() {
             DELU publishes day-ahead and 10-day point and probabilistic (P10
             through P90) forecasts for the German–Luxembourgian bidding zone:
             load, solar, onshore and offshore wind, total generation, and the
-            day-ahead price. Runs rebuild twice daily at 05:30 and 11:30
-            Europe/Berlin. Each verified account gets one API key with 5,000
+            day-ahead price. All six quantities run at 05:30 Europe/Berlin.
+            Price runs again at 11:30 for both horizons. Each verified account gets one API key with 5,000
             calls a day; per-minute limits also apply. Calls made with your key
             count as yours. Rotate the key under API &amp; keys if it is
             exposed.

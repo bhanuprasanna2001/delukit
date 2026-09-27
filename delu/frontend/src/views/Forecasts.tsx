@@ -24,7 +24,7 @@ interface Sel {
 }
 
 const GATE_INFO =
-  "Two model runs a day. 05:30 runs before the morning auctions. 11:30 sees the EXAA results and the ENTSO-E day-ahead load forecast, so its day-ahead read is cleaner.";
+  "05:30 publishes all six forecast quantities for both horizons. 11:30 publishes price forecasts for both horizons using the later modeled input cutoff. Older runs remain available where published.";
 
 const seg =
   "inline-flex h-8 cursor-pointer items-center rounded-[5px] px-3 text-sm font-medium transition-colors";
@@ -49,18 +49,24 @@ export function Forecasts() {
   const eff = useMemo((): Sel | null => {
     if (!opts || opts.dates.length === 0) return null;
     const date = opts.dates.includes(sel.date) ? sel.date : opts.dates[opts.dates.length - 1];
-    const gates = opts.runs?.[date]?.[sel.span] ?? opts.gates;
-    const gate = gates.includes(sel.gate)
-      ? sel.gate
-      : gates.includes("1130")
-        ? "1130"
-        : gates[0];
-    const target = opts.targets.includes(sel.target)
+    const dayProducts = opts.products[date] ?? {};
+    const span = opts.spans.find((candidate) =>
+      candidate === sel.span && opts.gates.some((gate) => (dayProducts[gate]?.[candidate] ?? []).length > 0),
+    ) ?? opts.spans.find((candidate) =>
+      opts.gates.some((gate) => (dayProducts[gate]?.[candidate] ?? []).length > 0),
+    );
+    if (!span) return null;
+    const availableTargets = opts.targets.filter((target) =>
+      opts.gates.some((gate) => dayProducts[gate]?.[span]?.includes(target)),
+    );
+    const target = availableTargets.includes(sel.target)
       ? sel.target
-      : opts.targets.includes("load_actual_mw")
+      : availableTargets.includes("load_actual_mw")
         ? "load_actual_mw"
-        : opts.targets[0];
-    return { date, gate, span: sel.span, target, kind: sel.kind };
+        : availableTargets[0];
+    const gates = opts.gates.filter((gate) => dayProducts[gate]?.[span]?.includes(target));
+    const gate = gates.includes(sel.gate) ? sel.gate : gates.includes("1130") ? "1130" : gates[0];
+    return { date, gate, span, target, kind: sel.kind };
   }, [opts, sel]);
 
   useEffect(() => {
@@ -102,7 +108,12 @@ export function Forecasts() {
     );
   }
 
-  const gates = opts.runs?.[eff?.date ?? ""]?.[eff?.span ?? "d1"] ?? opts.gates;
+  const gates = opts.gates.filter((gate) =>
+    opts.products[eff?.date ?? ""]?.[gate]?.[eff?.span ?? "d1"]?.includes(eff?.target ?? ""),
+  );
+  const targets = opts.targets.filter((target) =>
+    opts.gates.some((gate) => opts.products[eff?.date ?? ""]?.[gate]?.[eff?.span ?? "d1"]?.includes(target)),
+  );
 
   const dayIdx = eff ? opts.dates.indexOf(eff.date) : -1;
   const prevDay = dayIdx > 0 ? opts.dates[dayIdx - 1] : null;
@@ -205,12 +216,13 @@ export function Forecasts() {
                 <button
                   key={v}
                   type="button"
+                  disabled={!opts.gates.some((gate) => (opts.products[eff?.date ?? ""]?.[gate]?.[v] ?? []).length > 0)}
                   onClick={() => setSel((s) => ({ ...s, span: v }))}
                   className={cn(
                     seg,
                     eff?.span === v
                       ? "bg-ink text-white"
-                      : "text-ink-soft hover:text-ink",
+                      : "text-ink-soft hover:text-ink disabled:opacity-35 disabled:hover:text-ink-soft",
                   )}
                 >
                   {label}
@@ -225,7 +237,7 @@ export function Forecasts() {
               value={eff?.target ?? ""}
               onChange={(e) => setSel((s) => ({ ...s, target: e.target.value }))}
             >
-              {opts.targets.map((t) => (
+              {targets.map((t) => (
                 <option key={t} value={t}>
                   {targetLabel(t)}
                 </option>

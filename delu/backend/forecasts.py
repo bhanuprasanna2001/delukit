@@ -76,8 +76,16 @@ def _published(day: str, gate: str, span: str) -> dict[str, Path] | None:
     }
 
 
-def _run_present(day_dir: Path, gate: str, span: str) -> bool:
-    return (day_dir / f"{gate}.json").is_file() or (day_dir / f"{gate}_{span}").is_dir()
+def _available_targets(day: str, gate: str, span: str) -> list[str]:
+    published = _published(day, gate, span)
+    if published is not None:
+        return sorted(target for target, path in published.items() if path.is_file())
+    return sorted(
+        {
+            path.stem.rpartition("__")[0]
+            for path in (FORECASTS_DIR / day / f"{gate}_{span}").glob("*__*.parquet")
+        }
+    )
 
 
 def _actual_series(target: str) -> pd.Series | None:
@@ -99,36 +107,35 @@ def _actual_series(target: str) -> pd.Series | None:
 
 def options() -> dict:
     if not FORECASTS_DIR.is_dir():
-        return {"dates": [], "gates": list(GATES), "spans": list(SPANS), "targets": []}
-    dates = sorted(
-        p.name
-        for p in FORECASTS_DIR.iterdir()
-        if p.is_dir()
-        and len(p.name) == 10
-        and p.name[4:5] == "-"
-        and any(_run_present(p, gate, span) for gate in GATES for span in SPANS)
-    )
+        return {
+            "dates": [],
+            "gates": list(GATES),
+            "spans": list(SPANS),
+            "targets": [],
+            "runs": {},
+            "products": {},
+        }
     targets: set[str] = set()
     runs: dict[str, dict[str, list[str]]] = {}
-    for day in dates:
-        for span in SPANS:
-            gates = [g for g in GATES if _run_present(FORECASTS_DIR / day, g, span)]
-            if gates:
-                runs.setdefault(day, {})[span] = gates
-                for gate in gates:
-                    published = _published(day, gate, span)
-                    if published is not None:
-                        targets.update(published)
-        for path in (FORECASTS_DIR / day).glob("*/*__*.parquet"):
-            target, sep, _ = path.stem.rpartition("__")
-            if sep and target:
-                targets.add(target)
+    products: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for day_dir in sorted(FORECASTS_DIR.iterdir()):
+        if not day_dir.is_dir() or len(day_dir.name) != 10 or day_dir.name[4:5] != "-":
+            continue
+        day = day_dir.name
+        for gate in GATES:
+            for span in SPANS:
+                available = _available_targets(day, gate, span)
+                if available:
+                    products.setdefault(day, {}).setdefault(gate, {})[span] = available
+                    runs.setdefault(day, {}).setdefault(span, []).append(gate)
+                    targets.update(available)
     return {
-        "dates": dates,
+        "dates": sorted(products),
         "gates": list(GATES),
         "spans": list(SPANS),
         "targets": sorted(targets),
         "runs": runs,
+        "products": products,
     }
 
 
@@ -150,15 +157,33 @@ def resolve(day: str | None, gate: str | None, span: str, target: str):
     opts = options()
     if not opts["dates"]:
         raise Missing("No forecasts published yet.")
-    day = day or opts["dates"][-1]
     if span not in SPANS:
         raise Missing(f"Span must be one of {SPANS}.")
-    present = [g for g in GATES if _run_present(FORECASTS_DIR / day, g, span)]
+    if day is None:
+        day = next(
+            (
+                candidate
+                for candidate in reversed(opts["dates"])
+                if any(
+                    target
+                    in opts["products"][candidate].get(candidate_gate, {}).get(span, [])
+                    for candidate_gate in ((gate,) if gate else GATES)
+                )
+            ),
+            None,
+        )
+        if day is None:
+            raise Missing(f"No {span} forecast for {target}.")
+    present = [
+        candidate_gate
+        for candidate_gate in GATES
+        if target in opts["products"].get(day, {}).get(candidate_gate, {}).get(span, [])
+    ]
     if not present:
-        raise Missing(f"No {span} forecast for {day}.")
+        raise Missing(f"No {span} forecast for {target} on {day}.")
     gate = gate or ("1130" if "1130" in present else present[-1])
     if gate not in present:
-        raise Missing(f"No {span} forecast for {day} at {gate}.")
+        raise Missing(f"No {span} forecast for {target} on {day} at {gate}.")
     return day, gate
 
 

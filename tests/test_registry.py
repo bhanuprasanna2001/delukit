@@ -85,7 +85,7 @@ def test_gate_cannot_publish_without_an_active_registered_model(tmp_path, monkey
     monkeypatch.setattr(products, "MLFLOW_DIR", tmp_path / "mlflow")
     monkeypatch.setattr(products, "FORECAST_DIR", tmp_path / "forecasts")
     with pytest.raises(MlflowException):
-        forecast.run_gate(date(2026, 1, 5), "0530", ("load",))
+        forecast.run_gate(date(2026, 1, 5), "0530")
     assert not (tmp_path / "forecasts" / "2026-01-05" / "0530.json").exists()
 
 
@@ -107,8 +107,8 @@ def test_failed_refit_keeps_active_version(tmp_path, monkeypatch):
     from delukit.models import forecast, registry
 
     monkeypatch.setattr(products, "MLFLOW_DIR", tmp_path / "mlflow")
-    monkeypatch.setattr(registry, "TARGETS", ("load",))
-    monkeypatch.setattr(registry, "SPANS", ("d1",))
+    monkeypatch.setitem(products.PRODUCTS_BY_GATE, "0530", (("d1", "load"),))
+    monkeypatch.setitem(products.PRODUCTS_BY_GATE, "1130", ())
     storage = products.mlflow_storage()
     client = MlflowClient(tracking_uri=storage.tracking_uri)
     name = "load__0530__d1"
@@ -164,9 +164,7 @@ def test_gate_publishes_pinned_version_and_input_snapshot(tmp_path, monkeypatch)
         [TimeSeriesDataset(frame, sample_interval=QUARTER)]
     )
     monkeypatch.setattr(forecast, "load", lambda: data)
-    monkeypatch.setattr(forecast, "SPANS", ("d1",))
-    monkeypatch.setattr(products, "SPANS", ("d1",))
-    monkeypatch.setattr(products, "TARGETS", ("load",))
+    monkeypatch.setitem(products.PRODUCTS_BY_GATE, gate, (("d1", "load"),))
     monkeypatch.setattr(products, "FORECAST_DIR", tmp_path / "forecasts")
 
     class Workflow:
@@ -191,7 +189,7 @@ def test_gate_publishes_pinned_version_and_input_snapshot(tmp_path, monkeypatch)
             workflow=Workflow(), model_type="xgboost", version="7", run_id="run-7"
         ),
     )
-    forecast.run_gate(day, gate, ("load",))
+    forecast.run_gate(day, gate)
 
     manifest = json.loads(
         (products.FORECAST_DIR / day.isoformat() / "0530.json").read_text()

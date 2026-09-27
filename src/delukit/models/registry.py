@@ -23,7 +23,7 @@ from openstef_models.workflows.custom_forecasting_workflow import (
 )
 
 from delukit.core.clean import BERLIN, quarter_grid
-from delukit.core.config.products import SPANS, TARGETS, mlflow_storage, model_id
+from delukit.core.config.products import PRODUCTS_BY_GATE, mlflow_storage, model_id
 from delukit.data.dataset import load
 from delukit.ops.publication import validate_product
 
@@ -149,75 +149,74 @@ def train_all(as_of: datetime) -> list[dict]:
     client = _client()
     storage = mlflow_storage()
 
-    for gate in ("0530", "1130"):
-        for span in SPANS:
-            for target in TARGETS:
-                name = model_id(target, gate, span)
+    for gate, products in PRODUCTS_BY_GATE.items():
+        for span, target in products:
+            name = model_id(target, gate, span)
+            try:
+                complete_day = _last_complete_day(data, target, local_day)
+                training_end = datetime.combine(
+                    complete_day + timedelta(days=1), time.min, BERLIN
+                ) - timedelta(minutes=15)
+                eligible = data.filter_by_range(end=training_end)
+                run_name = uuid4().hex
                 try:
-                    complete_day = _last_complete_day(data, target, local_day)
-                    training_end = datetime.combine(
-                        complete_day + timedelta(days=1), time.min, BERLIN
-                    ) - timedelta(minutes=15)
-                    eligible = data.filter_by_range(end=training_end)
-                    run_name = uuid4().hex
+                    client.get_model_version_by_alias(name, ACTIVE_ALIAS)
+                except MlflowException as exc:
+                    if exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+                        raise
+                    algorithms = (PRIMARY_MODEL, *FALLBACK_MODELS)
+                else:
+                    algorithms = (PRIMARY_MODEL,)
+                for algorithm in algorithms:
+                    workflow = create_workflow(
+                        target,
+                        gate,
+                        span,
+                        model=algorithm,
+                        registry=True,
+                        force_retrain=True,
+                    )
+                    workflow.run_name = run_name
                     try:
-                        client.get_model_version_by_alias(name, ACTIVE_ALIAS)
-                    except MlflowException as exc:
-                        if exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+                        workflow.fit(eligible)
+                        if not workflow.model.is_fitted:
+                            raise PredictError(f"{name} did not fit")
+                        break
+                    except (
+                        FlatlinerDetectedError,
+                        InsufficientlyCompleteError,
+                        PredictError,
+                    ):
+                        if algorithm == algorithms[-1]:
                             raise
-                        algorithms = (PRIMARY_MODEL, *FALLBACK_MODELS)
-                    else:
-                        algorithms = (PRIMARY_MODEL,)
-                    for algorithm in algorithms:
-                        workflow = create_workflow(
-                            target,
-                            gate,
-                            span,
-                            model=algorithm,
-                            registry=True,
-                            force_retrain=True,
-                        )
-                        workflow.run_name = run_name
-                        try:
-                            workflow.fit(eligible)
-                            if not workflow.model.is_fitted:
-                                raise PredictError(f"{name} did not fit")
-                            break
-                        except (
-                            FlatlinerDetectedError,
-                            InsufficientlyCompleteError,
-                            PredictError,
-                        ):
-                            if algorithm == algorithms[-1]:
-                                raise
-                    run = storage.search_run(name, run_name)
-                    if run is None:
-                        raise ValueError(f"OpenSTEF did not record a run for {name}.")
-                    version = _register_run(name, run.info.run_id)
-                    registered = load_version(name, version)
-                    origin = gate_datetime(local_day, gate)
-                    forecast = predict_product(
-                        registered.workflow, span, forecast_origin=origin
-                    )
+                run = storage.search_run(name, run_name)
+                if run is None:
+                    raise ValueError(f"OpenSTEF did not record a run for {name}.")
+                version = _register_run(name, run.info.run_id)
+                registered = load_version(name, version)
+                origin = gate_datetime(local_day, gate)
+                forecast = predict_product(
+                    registered.workflow, span, forecast_origin=origin
+                )
 
-                    with TemporaryDirectory() as tmp:
-                        sample = Path(tmp) / "forecast.parquet"
-                        forecast.to_parquet(sample)
-                        validate_product(sample, local_day, span)
-                    client.set_registered_model_alias(name, ACTIVE_ALIAS, version)
-                    outcomes.append(
-                        {
-                            "target": target,
-                            "gate": gate,
-                            "span": span,
-                            "model": registered.model_type,
-                            "model_version": version,
-                            "model_run_id": run.info.run_id,
-                            "training_end": complete_day.isoformat(),
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failures.append(f"{name}: {type(exc).__name__}: {exc}")
+                with TemporaryDirectory() as tmp:
+                    sample = Path(tmp) / "forecast.parquet"
+                    forecast.to_parquet(sample)
+                    validate_product(sample, local_day, span)
+                client.set_registered_model_alias(name, ACTIVE_ALIAS, version)
+                outcomes.append(
+                    {
+                        "target": target,
+                        "gate": gate,
+                        "span": span,
+                        "model": registered.model_type,
+                        "model_version": version,
+                        "model_run_id": run.info.run_id,
+                        "training_end": complete_day.isoformat(),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"{name}: {type(exc).__name__}: {exc}")
     if failures:
         raise RuntimeError("Training failed for:\n" + "\n".join(failures))
     return outcomes

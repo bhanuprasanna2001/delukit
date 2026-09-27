@@ -71,3 +71,34 @@ def test_new_publication_requires_all_nine_quantiles(tmp_dirs):
     ).to_parquet(path)
     with pytest.raises(ValueError, match="missing forecast quantiles"):
         validate_product(path, day, "d1")
+
+
+def test_1130_publishes_price_for_both_spans_only(tmp_dirs):
+    from delukit.core.config.products import QUANTILES
+    from delukit.ops.publication import (
+        begin_run,
+        expected_index,
+        publish,
+        published_products,
+    )
+
+    day = date(2026, 4, 1)
+    root = begin_run(day, "1130")
+    products = []
+    for span in ("d1", "d10"):
+        outdir = root / span
+        outdir.mkdir()
+        pd.DataFrame(
+            {quantile.format(): i for i, quantile in enumerate(QUANTILES)},
+            index=expected_index(day, span),
+        ).to_parquet(outdir / "price_sdac_seq1_eur_mwh__xgboost.parquet")
+        products.append(
+            {"span": span, "target": "price_sdac_seq1_eur_mwh", "model": "xgboost"}
+        )
+    with pytest.raises(ValueError, match="every configured product"):
+        publish(day, "1130", root, products[:1])
+    manifest = publish(day, "1130", root, products)
+    assert len(json.loads(manifest.read_text())["products"]) == 2
+    assert [target for target, _, _ in published_products(day, "1130", "d10")] == [
+        "price_sdac_seq1_eur_mwh"
+    ]

@@ -45,7 +45,7 @@ def begin_run(day: date, gate: str) -> Path:
 
 
 def publish(day: date, gate: str, run_dir: Path, products: list[dict]) -> Path:
-    expected = {(span, target) for span in config.SPANS for target in config.TARGETS}
+    expected = set(config.PRODUCTS_BY_GATE[gate])
     actual = {(item["span"], item["target"]) for item in products}
     if actual != expected or len(products) != len(expected):
         raise ValueError(

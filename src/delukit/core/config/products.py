@@ -41,6 +41,10 @@ QUANTILES = [Q(level / 10) for level in range(1, 10)]
 SPAN_D1 = "d1"
 SPAN_D10 = "d10"
 SPANS = (SPAN_D1, SPAN_D10)
+PRODUCTS_BY_GATE = {
+    GATE_0530: tuple((span, target) for span in SPANS for target in TARGETS),
+    GATE_1130: tuple((span, "price_sdac_seq1_eur_mwh") for span in SPANS),
+}
 
 HORIZONS = {
     (GATE_0530, SPAN_D1): [LeadTime(timedelta(hours=42, minutes=30))],
