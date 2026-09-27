@@ -27,7 +27,7 @@ const UPDATED = "September 2026";
 function Hero({ lede }: { lede: string }) {
   return (
     <div className="grid gap-3">
-      <p className="max-w-2xl text-base leading-relaxed text-ink-soft">{lede}</p>
+      <p className="text-base leading-relaxed text-ink-soft">{lede}</p>
       <p className="flex items-center gap-1.5 text-xs text-ink-faint">
         <BadgeCheck className="size-3.5" />
         Last updated {UPDATED}

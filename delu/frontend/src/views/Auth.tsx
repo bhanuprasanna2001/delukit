@@ -5,7 +5,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 
-export function LoginForm({ onDone }: { onDone: () => void }) {
+export function LoginForm({
+  onDone,
+  description = "Forecasts are public. Sign in for API access.",
+}: {
+  onDone: () => void;
+  description?: string;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +35,7 @@ export function LoginForm({ onDone }: { onDone: () => void }) {
     <Card className="w-full max-w-md">
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
-        <CardDescription>Forecasts are public. Sign in for API access.</CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="grid gap-4">
@@ -62,6 +68,32 @@ export function LoginForm({ onDone }: { onDone: () => void }) {
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+export function AccountAccess({
+  description,
+  onSignedIn,
+  onCreateAccount,
+}: {
+  description: string;
+  onSignedIn: () => void;
+  onCreateAccount: () => void;
+}) {
+  return (
+    <div className="mx-auto grid w-full max-w-md gap-3">
+      <LoginForm onDone={onSignedIn} description={description} />
+      <p className="text-center text-sm text-ink-soft">
+        New here?{" "}
+        <button
+          type="button"
+          className="cursor-pointer underline underline-offset-2 hover:text-brand-deep"
+          onClick={onCreateAccount}
+        >
+          Create an account
+        </button>
+      </p>
+    </div>
   );
 }
 

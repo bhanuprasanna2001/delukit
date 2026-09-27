@@ -1,13 +1,14 @@
 import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import { KeyReveal } from "./components/KeyReveal";
+import { ApiGuide } from "./components/ApiGuide";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { getMe, logout, verifyEmail, type Me } from "./lib/api";
 import { cn } from "./lib/utils";
 import { About } from "./views/About";
-import { LoginForm, SignupForm } from "./views/Auth";
+import { AccountAccess, SignupForm } from "./views/Auth";
 import { Dashboard } from "./views/Dashboard";
 import { Download } from "./views/Download";
 import { Forecasts } from "./views/Forecasts";
@@ -144,7 +145,7 @@ export default function App() {
               <Button
                 variant={view === "dashboard" || view === "verify" ? "secondary" : "ghost"}
                 size="sm"
-                onClick={() => setView(me ? "dashboard" : "login")}
+                onClick={() => setView("dashboard")}
               >
                 <KeyRound />
                 API &amp; keys
@@ -189,24 +190,14 @@ export default function App() {
           <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">
             {view === "login"
             ? center(
-                <div className="grid w-full max-w-md gap-3">
-                  <LoginForm
-                    onDone={() => {
-                      refreshMe();
-                      setView("dashboard");
-                    }}
-                  />
-                  <p className="text-center text-sm text-ink-soft">
-                    New here?{" "}
-                    <button
-                      type="button"
-                      className="cursor-pointer underline"
-                      onClick={() => setView("signup")}
-                    >
-                      Create an account
-                    </button>
-                  </p>
-                </div>,
+                <AccountAccess
+                  description="Forecasts are public. Sign in for downloads and API access."
+                  onSignedIn={() => {
+                    refreshMe();
+                    setView("dashboard");
+                  }}
+                  onCreateAccount={() => setView("signup")}
+                />,
               )
             : null}
 
@@ -267,17 +258,21 @@ export default function App() {
                   onDeleted={accountDeleted}
                 />
               ) : (
-                <div className="grid gap-3">
-                  <p className="text-sm text-ink-soft">Sign in to manage the API key.</p>
-                  <div>
-                    <Button onClick={() => setView("login")}>Sign in</Button>
+                <div className="pt-4">
+                  <AccountAccess
+                    description="Sign in to manage your key and try the forecast API."
+                    onSignedIn={refreshMe}
+                    onCreateAccount={() => setView("signup")}
+                  />
+                  <div className="mt-8">
+                    <ApiGuide />
                   </div>
                 </div>
               )}
             </div>
           ) : null}
             {view === "download" ? (
-              <Download me={me ?? null} onSignIn={() => setView("login")} go={setView} />
+              <Download me={me} onSignedIn={refreshMe} go={setView} />
             ) : null}
 
             {view === "about" ? (

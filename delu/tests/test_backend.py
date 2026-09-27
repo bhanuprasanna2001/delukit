@@ -409,6 +409,22 @@ def test_app_health_options_security(tmp_dirs, monkeypatch):
     assert c.get("/api/options").status_code == 200
     spec = c.get("/openapi-forecast.json").json()
     assert list(spec["paths"]) == ["/v1/forecast"]
+    operation = spec["paths"]["/v1/forecast"]["get"]
+    assert operation["tags"] == ["Forecasts"]
+    assert operation["security"] == [{"ApiKey": []}, {"Bearer": []}]
+    assert {parameter["name"] for parameter in operation["parameters"]} == {
+        "date",
+        "gate",
+        "span",
+        "target",
+        "type",
+    }
+    assert all(parameter["description"] for parameter in operation["parameters"])
+    response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response == {"$ref": "#/components/schemas/ForecastResponse"}
+    assert (
+        "timestamps" in spec["components"]["schemas"]["ForecastResponse"]["properties"]
+    )
 
 
 def test_app_forecast_validation_and_v1_auth(tmp_dirs, monkeypatch, actuals):
@@ -438,7 +454,9 @@ def test_app_v1_quota_and_export(tmp_dirs, monkeypatch, actuals):
     for _ in range(2 * keys.MIN_LIMIT):
         if not keys.check_and_hit(kid)[0]:
             break
-    assert c.get("/v1/forecast", headers={"X-API-Key": raw}).status_code == 429
+    limited = c.get("/v1/forecast", headers={"X-API-Key": raw})
+    assert limited.status_code == 429
+    assert int(limited.headers["Retry-After"]) > 0
     exported = c.get("/api/export", params={"start": "2026-01-05", "end": "2026-01-05"})
     assert exported.status_code == 200
     assert pd.read_csv(io.BytesIO(exported.content))[

@@ -4,12 +4,22 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import auth, db, forecasts, keys
+from backend.forecast_schema import ForecastResponse
 from backend.mail import configured, send_contact, send_verify
 
 PUBLIC_URL = os.getenv("DELU_PUBLIC_URL", "http://localhost:8000")
@@ -141,8 +151,11 @@ def api_key_user(
     response.headers["X-RateLimit-Minute"] = str(keys.MIN_LIMIT)
     response.headers["X-RateLimit-Day"] = str(keys.DAY_LIMIT)
     if not ok:
-        response.headers["Retry-After"] = str(retry)
-        raise HTTPException(status_code=429, detail="Rate limit reached. Slow down.")
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit reached. Slow down.",
+            headers={"Retry-After": str(retry)},
+        )
     keys.touch(found["id"])
     return found
 
@@ -177,13 +190,45 @@ def api_forecast(
     return _forecast(date, gate, span, target, type)
 
 
-@app.get("/v1/forecast", operation_id="getForecast")
+@app.get(
+    "/v1/forecast",
+    operation_id="getForecast",
+    tags=["Forecasts"],
+    summary="Get a forecast",
+    description=(
+        "Returns the latest available DE-LU forecast for a quantity and span, "
+        "or a specific published run when date and gate are supplied. "
+        "Pass your key through the Authorize control or the X-API-Key header. "
+        "All series align with timestamps by array position. "
+        "The limit is 60 requests per minute and 5,000 per day per key."
+    ),
+    response_model=ForecastResponse,
+    responses={
+        401: {"description": "Missing or invalid API key."},
+        404: {"description": "No forecast matches the requested run and quantity."},
+        429: {"description": "Minute or daily request limit reached."},
+    },
+)
 def v1_forecast(
-    date: str | None = None,
-    gate: str | None = None,
-    span: str = "d1",
-    target: str = "load_actual_mw",
-    type: str = "probabilistic",
+    date: str | None = Query(
+        default=None,
+        description="Origin date, YYYY-MM-DD. Omit for the latest matching run.",
+    ),
+    gate: str | None = Query(
+        default=None,
+        description="Run time in Europe/Berlin: 0530 or 1130. Omit for the latest available gate.",
+    ),
+    span: str = Query(
+        default="d1", description="d1 for day ahead or d10 for ten days."
+    ),
+    target: str = Query(
+        default="load_actual_mw",
+        description="Quantity identifier. GET /api/options lists the published targets and runs.",
+    ),
+    type: str = Query(
+        default="probabilistic",
+        description="probabilistic returns P10-P90; point returns P50 with other quantiles null.",
+    ),
     _key: dict = Depends(api_key_user),
 ) -> dict:
     if type not in ("point", "probabilistic"):
@@ -195,6 +240,13 @@ def v1_forecast(
 def openapi_forecast() -> dict:
     full = app.openapi()
     paths = {"/v1/forecast": full["paths"]["/v1/forecast"]}
+    operation = paths["/v1/forecast"]["get"]
+    operation["parameters"] = [
+        parameter
+        for parameter in operation.get("parameters", [])
+        if parameter["name"].lower() not in {"x-api-key", "authorization"}
+    ]
+    operation["security"] = [{"ApiKey": []}, {"Bearer": []}]
 
     def gather(node, out: set[str]) -> None:
         if isinstance(node, dict):
@@ -230,10 +282,17 @@ def openapi_forecast() -> dict:
     }
     return {
         "openapi": full["openapi"],
-        "info": {"title": "DELU forecast API", "version": full["info"]["version"]},
+        "info": {
+            "title": "DELU forecast API",
+            "version": full["info"]["version"],
+            "description": (
+                "Published power forecasts for the DE-LU bidding zone. "
+                "Create an account, confirm your email, and authorize with your API key."
+            ),
+        },
         "paths": paths,
+        "tags": [{"name": "Forecasts", "description": "Published forecast series."}],
         "components": components,
-        "security": [{"ApiKey": []}],
     }
 
 

@@ -35,7 +35,7 @@ const CARDS = [
 export function About({ go }: { go: (v: View) => void }) {
   return (
     <div className="grid gap-8">
-      <p className="max-w-2xl text-base leading-relaxed text-ink-soft">
+      <p className="text-base leading-relaxed text-ink-soft">
         DELU publishes day-ahead and 10-day point and probabilistic forecasts
         for the German–Luxembourgian bidding zone — load, solar, onshore and
         offshore wind, total generation, and the day-ahead price. All six

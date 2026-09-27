@@ -1,7 +1,7 @@
 import { KeyRound } from "lucide-react";
-import { useState } from "react";
-import SwaggerUI from "swagger-ui-react";
-import "swagger-ui-react/swagger-ui.css";
+import { lazy, Suspense, useState } from "react";
+import { ApiGuide } from "../components/ApiGuide";
+import { DeleteAccountCard } from "../components/DeleteAccountCard";
 import { KeyReveal } from "../components/KeyReveal";
 import { Button } from "../components/ui/button";
 import {
@@ -11,96 +11,14 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import {
   berlinLong,
-  deleteAccount,
   refreshKey,
   resend,
   type Me,
 } from "../lib/api";
 
-function DeleteAccountCard({ onDeleted }: { onDeleted: () => void }) {
-  const [arming, setArming] = useState(false);
-  const [password, setPassword] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-
-  async function confirm() {
-    setPending(true);
-    setError("");
-    try {
-      await deleteAccount(password);
-      onDeleted();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Deletion failed.");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Delete account</CardTitle>
-        <CardDescription>
-          Removes the account, API key, sessions and usage counters
-          immediately. This cannot be undone.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        {arming ? (
-          <>
-            <div className="grid gap-1.5">
-              <Label htmlFor="delete-password">Confirm with your password</Label>
-              <Input
-                id="delete-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            {error ? <p className="text-sm text-red-700">{error}</p> : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                onClick={confirm}
-                disabled={pending || !password}
-                className="border-red-300 text-red-700 hover:bg-red-50"
-              >
-                {pending ? "Deleting…" : "Delete everything"}
-              </Button>
-              <button
-                type="button"
-                className="cursor-pointer text-sm text-ink-soft underline"
-                onClick={() => {
-                  setArming(false);
-                  setPassword("");
-                  setError("");
-                }}
-              >
-                Keep my account
-              </button>
-            </div>
-          </>
-        ) : (
-          <div>
-            <Button
-              variant="outline"
-              onClick={() => setArming(true)}
-              className="border-red-300 text-red-700 hover:bg-red-50"
-            >
-              Delete account
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+const ForecastApiReference = lazy(() => import("../components/ForecastApiReference"));
 
 export function Dashboard({
   me,
@@ -273,25 +191,11 @@ export function Dashboard({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Forecast API</CardTitle>
-          <CardDescription>
-            Just the forecast endpoint. Authorize with your key and try it
-            right here.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-hidden rounded-lg border border-line">
-            <SwaggerUI
-              url="/openapi-forecast.json"
-              docExpansion="list"
-              tryItOutEnabled
-              persistAuthorization
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <ApiGuide />
+
+      <Suspense fallback={<div className="h-64 animate-pulse rounded-lg bg-line" aria-label="Loading API reference" />}>
+        <ForecastApiReference />
+      </Suspense>
 
       <DeleteAccountCard onDeleted={onDeleted} />
     </div>

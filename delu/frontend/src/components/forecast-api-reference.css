@@ -1,0 +1,33 @@
+.forecast-api-reference .swagger-ui .information-container {
+  display: none;
+}
+
+.forecast-api-reference .swagger-ui .scheme-container {
+  margin: 0;
+  padding: 1rem;
+  box-shadow: none;
+  background: transparent;
+}
+
+.forecast-api-reference .swagger-ui .wrapper {
+  max-width: none;
+  padding: 0 1rem;
+}
+
+.forecast-api-reference .swagger-ui .opblock-tag {
+  display: none;
+}
+
+.forecast-api-reference .swagger-ui .opblock {
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 640px) {
+  .forecast-api-reference .swagger-ui .wrapper {
+    padding: 0 0.5rem;
+  }
+
+  .forecast-api-reference .swagger-ui .scheme-container {
+    padding: 0.75rem 0.5rem;
+  }
+}
