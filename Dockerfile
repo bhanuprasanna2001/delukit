@@ -37,7 +37,7 @@ COPY --chown=appuser:appuser delu ./delu
 ENV PATH="/app/.venv/bin:$PATH" \
     DAGSTER_HOME=/app/data/.dagster
 
-RUN mkdir -p data/.dagster data/raw data/clean data/versioned \
+RUN mkdir -p data/raw data/clean data/versioned \
     data/forecasts data/scores data/mlflow data/tuning data/ops \
     && chown -R appuser:appuser /app
 
@@ -47,5 +47,7 @@ EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
+
+ENTRYPOINT ["sh", "-c", "mkdir -p \"$DAGSTER_HOME\" && exec \"$@\"", "--"]
 
 CMD ["dagster", "dev", "-m", "delukit.dagster_app.definitions", "-h", "0.0.0.0", "-p", "3000"]
