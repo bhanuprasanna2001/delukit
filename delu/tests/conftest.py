@@ -1,11 +1,8 @@
-"""Shared fixtures: tmp forecast/actual dirs + isolated sqlite + clean throttles."""
-
 import pytest
 
 
 @pytest.fixture
 def tmp_dirs(monkeypatch, tmp_path):
-    """Point backend dirs at tmp; fresh DB; reset in-memory throttles."""
     forecasts = tmp_path / "forecasts"
     clean = tmp_path / "clean"
     forecasts.mkdir()
@@ -34,7 +31,6 @@ def tmp_dirs(monkeypatch, tmp_path):
 
 @pytest.fixture
 def actuals(tmp_dirs):
-    """Minimal realised-history sidecar so forecast load() can join actuals."""
     import pandas as pd
 
     idx = pd.date_range("2026-01-05 00:00", periods=200, freq="15min", tz="UTC")

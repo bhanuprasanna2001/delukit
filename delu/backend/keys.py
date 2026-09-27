@@ -36,8 +36,6 @@ def issue(user_id: int) -> tuple[str, str]:
             (user_id, _prefix_of(raw), _sha(raw), now.isoformat()),
         )
         if old_id is not None:
-            # Quota is per user per day, not per key: carry today's usage
-            # over so a refresh can never reset or double the allowance.
             day = now.date().isoformat()
             minute = int(now.timestamp()) // 60
             cx.execute(
@@ -49,8 +47,6 @@ def issue(user_id: int) -> tuple[str, str]:
                 (cur.lastrowid, old_id, minute),
             )
             if cur.lastrowid != old_id:
-                # Drop the old key's other minutes; skip when SQLite reused
-                # the id (then the rows above already belong to the new key).
                 cx.execute("DELETE FROM usage_min WHERE key_id = ?", (old_id,))
     return _prefix_of(raw), raw
 

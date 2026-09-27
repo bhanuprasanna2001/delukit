@@ -32,6 +32,7 @@ services:
       DELU_ACTUALS: /data/clean
       DELU_DB: /app/data/app.db
       DELU_PUBLIC_URL: ${DELU_PUBLIC_URL:-http://localhost:8000}
+      DELU_COOKIE_SECURE: ${DELU_COOKIE_SECURE:-0}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM: ${RESEND_FROM:-DELU <onboarding@resend.dev>}
       CONTACT_TO: ${CONTACT_TO:-bhanu.prasanna2001@gmail.com}

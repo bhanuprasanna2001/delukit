@@ -2,6 +2,7 @@ import json
 import os
 import smtplib
 import urllib.request
+from contextlib import suppress
 from email.message import EmailMessage
 
 SMTP_HOST = os.getenv("SMTP_HOST", "")
@@ -10,13 +11,14 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "delu@localhost")
 
-# One key powers both verification and contact mail. Set RESEND_API_KEY and
-# mail goes out over the Resend HTTPS API; otherwise SMTP is used (Resend
-# also offers smtp.resend.com:587, so the same key material works there).
-# Empty both = links/messages go to the logs (local dev).
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM = os.getenv("RESEND_FROM", SMTP_FROM)
 CONTACT_TO = os.getenv("CONTACT_TO", "bhanu.prasanna2001@gmail.com")
+REQUIRE_MAIL = os.getenv("DELU_REQUIRE_MAIL", "0") == "1"
+
+
+def configured() -> bool:
+    return bool(RESEND_API_KEY or (SMTP_HOST and SMTP_USER and SMTP_PASS))
 
 
 def _via_resend(to: str, subject: str, text: str, reply_to: str = "") -> bool:
@@ -46,8 +48,6 @@ def _via_resend(to: str, subject: str, text: str, reply_to: str = "") -> bool:
 def _via_smtp(to: str, subject: str, text: str, reply_to: str = "") -> bool:
     if not SMTP_HOST:
         return False
-    # Resend's SMTP login is username "resend" + the API key as password,
-    # so an empty SMTP_PASS falls back to RESEND_API_KEY.
     password = SMTP_PASS or RESEND_API_KEY
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -65,17 +65,12 @@ def _via_smtp(to: str, subject: str, text: str, reply_to: str = "") -> bool:
 
 
 def _deliver(to: str, subject: str, text: str, reply_to: str = "") -> bool:
-    """Resend API first, SMTP fallback. False = nothing configured."""
-    try:
+    with suppress(Exception):
         if _via_resend(to, subject, text, reply_to):
             return True
-    except Exception:  # noqa: BLE001 - delivery must never raise; falls through to SMTP
-        pass
-    try:
+    with suppress(Exception):
         if _via_smtp(to, subject, text, reply_to):
             return True
-    except Exception:  # noqa: BLE001 - delivery must never raise; caller logs instead
-        pass
     return False
 
 
@@ -86,13 +81,14 @@ def send_verify(email: str, link: str) -> None:
         "If you did not sign up, ignore this email."
     )
     if not _deliver(email, "Confirm your DELU account", body):
+        if REQUIRE_MAIL:
+            raise RuntimeError("Verification email could not be delivered")
         print(f"verify {email}: {link}", flush=True)
 
 
 def send_contact(name: str, sender: str, topic: str, message: str) -> bool:
-    """Forward a contact-form message to the inbox. True if handed to mail."""
     body = f"From: {name} <{sender}>\nTopic: {topic}\n\n{message}\n"
     ok = _deliver(CONTACT_TO, f"[DELU contact: {topic}] {name}", body, sender)
-    if not ok:
+    if not ok and not REQUIRE_MAIL:
         print(f"contact {sender} [{topic}]: {message}", flush=True)
     return ok

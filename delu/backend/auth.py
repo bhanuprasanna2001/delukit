@@ -17,7 +17,6 @@ _fails: dict[str, tuple[int, float]] = {}
 
 
 def check_throttle(key: str) -> None:
-    """Raise if this identity has failed too many times recently."""
     entry = _fails.get(key)
     if entry and entry[0] >= FAIL_LIMIT and time.monotonic() < entry[1] + LOCK_SECONDS:
         wait = int(LOCK_SECONDS - (time.monotonic() - entry[1]))
@@ -66,6 +65,8 @@ def signup(email: str, password: str) -> int:
             if "UNIQUE" in str(exc):
                 raise ValueError("An account with this email already exists.") from exc
             raise
+        if cur.lastrowid is None:
+            raise RuntimeError("SQLite did not return the created user id.")
         return cur.lastrowid
 
 
@@ -120,12 +121,6 @@ def logout(token: str) -> None:
 
 
 def delete_account(user_id: int, password: str) -> None:
-    """Verify the password, then remove the user and everything tied to it.
-
-    Cascades (sessions, email_tokens, api_keys) are handled by SQLite
-    ON DELETE CASCADE; usage_min/usage_day have no FK so are removed
-    explicitly first, otherwise orphaned counters would linger.
-    """
     with db.connect() as cx:
         row = cx.execute(
             "SELECT pw_hash, salt FROM users WHERE id = ?", (user_id,)
@@ -148,11 +143,14 @@ def session_user(token: str | None):
         return None
     with db.connect() as cx:
         row = cx.execute(
-            "SELECT u.id, u.email, u.verified FROM sessions s "
+            "SELECT u.id, u.email, u.verified, s.expires FROM sessions s "
             "JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
             (_sha(token),),
         ).fetchone()
         if row is None:
+            return None
+        if datetime.fromisoformat(row["expires"]) <= _now():
+            cx.execute("DELETE FROM sessions WHERE token_hash = ?", (_sha(token),))
             return None
         return {
             "id": row["id"],

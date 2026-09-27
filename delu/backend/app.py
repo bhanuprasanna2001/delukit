@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import auth, db, forecasts, keys
-from backend.mail import send_contact, send_verify
+from backend.mail import configured, send_contact, send_verify
 
 PUBLIC_URL = os.getenv("DELU_PUBLIC_URL", "http://localhost:8000")
 COOKIE_SECURE = os.getenv("DELU_COOKIE_SECURE", "0") == "1"
@@ -18,13 +18,12 @@ COOKIE_SECURE = os.getenv("DELU_COOKIE_SECURE", "0") == "1"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if os.getenv("DELU_REQUIRE_MAIL") == "1" and not configured():
+        raise RuntimeError("Configure Resend or SMTP before public deployment")
     db.init()
     yield
 
 
-# The machine-readable surface for key holders is /openapi-forecast.json
-# only, rendered in-app by the bundled Swagger UI. The default docs routes
-# would expose every internal endpoint (auth, sessions, key rotation) to anyone.
 app = FastAPI(
     title="DELU",
     version="0.1.0",
@@ -44,9 +43,6 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-# Per-IP fixed windows for the anonymous /api/* surface (/v1 has per-key
-# quotas in keys.py). ponytail: in-memory, exact for the single uvicorn
-# worker; move to Redis if workers > 1.
 _IP_LIMITS = {"/api/export": (10, 60), "/api/default": (60, 60)}
 _ip_hits: dict[str, deque[float]] = defaultdict(deque)
 
@@ -109,8 +105,6 @@ class ContactIn(BaseModel):
     message: str
 
 
-# Contact form: 5 sends per IP per hour. ponytail: in-memory like the
-# public rate limiter above; move to Redis if workers > 1.
 _contact_hits: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -192,7 +186,6 @@ def v1_forecast(
     type: str = "probabilistic",
     _key: dict = Depends(api_key_user),
 ) -> dict:
-    """Fetch a stored forecast. Send the API key as X-API-Key or a Bearer token."""
     if type not in ("point", "probabilistic"):
         raise HTTPException(status_code=400, detail="Type is point or probabilistic.")
     return _forecast(date, gate, span, target, type)
@@ -214,8 +207,6 @@ def openapi_forecast() -> dict:
             for v in node:
                 gather(v, out)
 
-    # Keep only the components the forecast path actually references
-    # (e.g. the generic 422 validation schemas), nothing from auth/keys.
     pending: set[str] = set()
     gather(paths, pending)
     kept: dict[str, dict] = {}
@@ -258,7 +249,6 @@ def api_export(
     format: str = "csv",
     _user: dict = Depends(verified_user),
 ) -> Response:
-    """Custom forecast export as CSV, parquet or XLSX, for key holders."""
     try:
         name, media, data = forecasts.export_file(
             start, end, target, gate, kind, tz, horizon_days, format
@@ -267,7 +257,6 @@ def api_export(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except forecasts.Missing as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    # ponytail: whole file in memory; ~5MB at 75 days, stream from disk if bigger.
     return Response(
         data,
         media_type=media,
@@ -277,7 +266,6 @@ def api_export(
 
 @app.post("/api/contact")
 def contact(body: ContactIn, request: Request) -> dict:
-    """Forward a contact-form message to the operator inbox via Resend/SMTP."""
     from backend import auth as _auth
 
     name = body.name.strip()[:80]
@@ -306,7 +294,11 @@ def contact(body: ContactIn, request: Request) -> dict:
             status_code=429, detail="Too many messages. Try again in an hour."
         )
     hits.append(now)
-    send_contact(name, email, topic, message)
+    sent = send_contact(name, email, topic, message)
+    if os.getenv("DELU_REQUIRE_MAIL") == "1" and not sent:
+        raise HTTPException(
+            status_code=503, detail="Mail is unavailable. Try again later."
+        )
     return {"ok": True, "detail": "Message sent. Expect a reply within 2 working days."}
 
 
@@ -323,7 +315,13 @@ def signup(body: Signup, request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     auth.note_ok(f"signup:{ip}")
     token = auth.issue_verify_token(user_id)
-    send_verify(body.email.strip().lower(), f"{PUBLIC_URL}/?verify={token}")
+    try:
+        send_verify(body.email.strip().lower(), f"{PUBLIC_URL}/?verify={token}")
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Account created, but confirmation mail failed. Sign in and retry.",
+        ) from exc
     return {"ok": True, "detail": "Account created. Check your inbox to confirm."}
 
 
@@ -346,7 +344,12 @@ def verify(token: str = "") -> dict:
 @app.post("/auth/resend")
 def resend(user: dict = Depends(current_user)) -> dict:
     token = auth.issue_verify_token(user["id"])
-    send_verify(user["email"], f"{PUBLIC_URL}/?verify={token}")
+    try:
+        send_verify(user["email"], f"{PUBLIC_URL}/?verify={token}")
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503, detail="Confirmation mail failed."
+        ) from exc
     return {"ok": True, "detail": "Confirmation sent. Check your inbox."}
 
 
@@ -361,7 +364,6 @@ def login(body: Login, request: Request, response: Response) -> dict:
     token = auth.login(body.email, body.password)
     if token is None:
         auth.note_fail(gate)
-        # Same error either way: no account enumeration.
         raise HTTPException(status_code=401, detail="Email or password is wrong.")
     auth.note_ok(gate)
     response.set_cookie(
@@ -373,6 +375,8 @@ def login(body: Login, request: Request, response: Response) -> dict:
         secure=COOKIE_SECURE,
     )
     user = auth.session_user(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Your session is no longer valid.")
     return {"email": user["email"], "verified": user["verified"]}
 
 
@@ -399,7 +403,6 @@ def delete_account(
     response: Response,
     user: dict = Depends(current_user),
 ) -> dict:
-    """Permanently remove the account, key, sessions and usage counters."""
     gate = f"delete:{user['id']}"
     try:
         auth.check_throttle(gate)
