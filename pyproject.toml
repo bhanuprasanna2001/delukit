@@ -34,13 +34,22 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
+    "pyright==1.1.414",
     "pytest>=9.1.1",
-    "ruff>=0.16.8",
+    "ruff==0.16.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
+
+[tool.pyright]
+include = ["src", "scripts/verify.py"]
+strict = ["scripts/verify.py"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
 
 [tool.ruff]
 target-version = "py312"
@@ -55,6 +64,4 @@ ignore = ["E501"]
 known-first-party = ["delukit"]
 
 [tool.ruff.lint.per-file-ignores]
-# Re-exports must sit below module constants (submodules import back),
-# so E402 is structural here, not sloppiness.
 "src/delukit/core/config/__init__.py" = ["E402"]

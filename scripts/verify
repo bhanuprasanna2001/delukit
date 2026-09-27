@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Run Delukit's repository checks."""
+
+from verify import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

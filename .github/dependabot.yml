@@ -1,6 +1,18 @@
 version: 2
 updates:
-  # Keeps hook revs and action pins moving; review the PRs, never blind-merge.
+  # Update each independently locked dependency project, plus shared CI hooks.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: uv
+    directory: /delu
+    schedule:
+      interval: monthly
+  - package-ecosystem: npm
+    directory: /delu/frontend
+    schedule:
+      interval: monthly
   - package-ecosystem: pre-commit
     directory: /
     schedule:

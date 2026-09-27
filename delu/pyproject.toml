@@ -15,7 +15,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28",
+    "pyright==1.1.414",
     "pytest>=9.1.1",
+    "ruff==0.16.8",
 ]
 
 [tool.uv]
@@ -25,6 +27,13 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+
+[tool.pyright]
+include = ["backend"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
 
 [tool.ruff]
 target-version = "py312"
