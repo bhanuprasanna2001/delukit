@@ -158,7 +158,6 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
     <div className="forecast-chart" ref={rootRef}>
       <div className="forecast-chart-heading">
         <h2 className="forecast-chart-title">{title}</h2>
-        <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
       </div>
 
       <div className="forecast-chart-toolbar">
@@ -217,10 +216,10 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
         }}
       />
       {!hasForecast && !hasActual ? <p className="forecast-chart-empty">No values in this forecast.</p> : null}
-      <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(domain.start)}</span><span>Full timeline · drag handles to narrow</span><span>{formatDay(domain.end)}</span></div>
+      <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(domain.start)}</span><span>{formatDay(domain.end)}</span></div>
       <div className="forecast-chart-footer">
         <span className="forecast-window-label" aria-live="polite">{formatTimestamp(window.start)} <span aria-hidden="true">→</span> {formatTimestamp(window.end)}</span>
-        <span className="forecast-chart-hint">{selectionMode ? "Drag across the plot to zoom" : "Drag to pan · Ctrl + scroll to zoom"}</span>
+        <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
       </div>
       <span className="sr-only" role="status">{announcement}</span>
     </div>

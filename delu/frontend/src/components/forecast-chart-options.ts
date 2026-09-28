@@ -172,7 +172,11 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
   const accent = forecastColor(data.meta.target, theme);
   const palette = CHART_PALETTE[theme];
   const forecastStart = data.p50.findIndex((value) => value !== null);
+  const builtAt = Date.parse(data.meta.generated_at);
   const annotationNearRight = times[forecastStart] > window.start + (window.end - window.start) * 0.8;
+  const buildNearLeft = builtAt < window.start + (window.end - window.start) * 0.08;
+  const buildAlignment: "left" | "right" = buildNearLeft ? "left" : "right";
+  const startAlignment: "left" | "right" = annotationNearRight ? "right" : "left";
   const [min, max] = visibleExtent(data, window, visibility);
   const left = compact ? 54 : 72;
   const right = compact ? 18 : 28;
@@ -189,12 +193,19 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
       silent: true, symbol: "none", animation: false,
       lineStyle: { color: palette.navigator, width: 1, type: "dashed" },
       label: {
-        color: palette.muted, fontSize: 11, formatter: "Forecast begins", position: "end", rotate: 0,
-        align: annotationNearRight ? "right" : "left", verticalAlign: "bottom",
-        offset: [annotationNearRight ? -8 : 8, -8], distance: 0,
+        color: palette.muted, fontSize: 11, position: "end", rotate: 0,
+        verticalAlign: "bottom", distance: 0,
       },
-      data: forecastStart > 0 && times[forecastStart] >= window.start && times[forecastStart] <= window.end
-        ? [{ xAxis: times[forecastStart] }] : [],
+      data: [
+        ...(builtAt >= window.start && builtAt <= window.end ? [{
+          xAxis: builtAt,
+          label: { formatter: "Forecast built", align: buildAlignment, offset: [buildNearLeft ? 8 : -8, -8] },
+        }] : []),
+        ...(forecastStart > 0 && times[forecastStart] >= window.start && times[forecastStart] <= window.end ? [{
+          xAxis: times[forecastStart],
+          label: { formatter: "Forecast begins", align: startAlignment, offset: [annotationNearRight ? -8 : 8, -8] },
+        }] : []),
+      ],
     },
   });
   if (visibility.actual) series.push({
