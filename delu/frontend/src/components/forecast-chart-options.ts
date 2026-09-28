@@ -227,7 +227,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
     animation: false, backgroundColor: palette.surface,
     textStyle: { fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' },
     grid: [
-      { left, right, top: 30, bottom: 116 },
+      { left, right, top: 30, bottom: 140 },
       { left, right, height: 44, bottom: 28 },
     ],
     xAxis: [
@@ -237,7 +237,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
         splitNumber: compact ? 3 : 7,
         axisLabel: { color: palette.muted, fontSize: 11, margin: 14, hideOverlap: true,
           formatter: (value: number) => window.end - window.start > 3 * 24 * HOUR
-            ? formatDay(value) : `${formatTime(value)}\n${formatDay(value)}`, lineHeight: 17 },
+            ? `\n${formatDay(value)}` : `${formatTime(value)}\n${formatDay(value)}`, lineHeight: 17 },
         axisPointer: { label: { show: false }, lineStyle: { color: palette.navigator, type: "dashed" } },
       },
       { type: "time", gridIndex: 1, min: domain.start, max: domain.end, show: false, boundaryGap: [0, 0] },

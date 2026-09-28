@@ -109,7 +109,7 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = palette.text;
     context.font = "600 32px sans-serif";
-    context.fillText(`${targetLabel(data.meta.target)} forecast · ${data.meta.span === "d10" ? "10-day horizon" : "Day-ahead"} · DE–LU`, 48, 48);
+    context.fillText(`${targetLabel(data.meta.target)} forecast`, 48, 48);
     context.fillStyle = palette.muted;
     context.font = "22px sans-serif";
     context.fillText(`${formatTimestamp(window.start)} to ${formatTimestamp(window.end)}`, 48, 86);
@@ -157,10 +157,7 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
   return (
     <div className="forecast-chart" ref={rootRef}>
       <div className="forecast-chart-heading">
-        <div className="forecast-chart-title">
-          <h2>{title}</h2>
-          <span>{data.meta.span === "d10" ? "10-day horizon" : "Day-ahead"}<span aria-hidden="true"> · </span>DE–LU</span>
-        </div>
+        <h2 className="forecast-chart-title">{title}</h2>
         <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
       </div>
 
