@@ -59,7 +59,7 @@ export function ApiGuide() {
                 with <code>python -m pip install requests</code>, set <code>DELU_API_KEY</code> in
                 your environment, and replace the base URL with this site&apos;s address.
               </p>
-              <pre className="overflow-x-auto rounded-md bg-night px-4 py-3 text-xs leading-relaxed text-white"><code>{pythonExample}</code></pre>
+              <pre className="overflow-x-auto rounded-md bg-night px-4 py-3 text-xs leading-relaxed text-on-night"><code>{pythonExample}</code></pre>
               <p>
                 You can also send <code>Authorization: Bearer YOUR_KEY</code>. Use the Authorize
                 button in the reference below to try the endpoint in your browser.

@@ -22,6 +22,19 @@
   margin-bottom: 1rem;
 }
 
+.forecast-api-reference .swagger-ui {
+  color: var(--color-ink);
+  filter: grayscale(1);
+}
+
+.forecast-api-reference .swagger-ui .scheme-container,
+.forecast-api-reference .swagger-ui .opblock,
+.forecast-api-reference .swagger-ui input,
+.forecast-api-reference .swagger-ui select,
+.forecast-api-reference .swagger-ui textarea {
+  border-color: var(--color-line);
+}
+
 @media (max-width: 640px) {
   .forecast-api-reference .swagger-ui .wrapper {
     padding: 0 0.5rem;

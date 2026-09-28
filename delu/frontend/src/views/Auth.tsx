@@ -61,7 +61,7 @@ export function LoginForm({
               required
             />
           </div>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-ink">{error}</p> : null}
           <Button type="submit" disabled={pending}>
             {pending ? "Signing in…" : "Sign in"}
           </Button>
@@ -151,7 +151,7 @@ export function SignupForm({ onDone }: { onDone: (detail: string) => void }) {
             />
             <p className="text-xs text-ink-faint">At least 8 characters.</p>
           </div>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-ink">{error}</p> : null}
           <Button type="submit" disabled={pending}>
             {pending ? "Creating…" : "Create account"}
           </Button>

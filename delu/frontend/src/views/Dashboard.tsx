@@ -152,7 +152,7 @@ export function Dashboard({
           ) : (
             <p className="text-sm text-ink-soft">No key yet. Refresh to create one.</p>
           )}
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-ink">{error}</p> : null}
           {freshKey ? (
             <div className="grid gap-2">
               <p className="text-sm font-medium">
@@ -167,7 +167,7 @@ export function Dashboard({
               onClick={refresh}
               disabled={pending}
               className={
-                arming ? "border-red-300 text-red-700 hover:bg-red-50" : undefined
+                arming ? "border-ink-soft text-ink hover:bg-brand-tint" : undefined
               }
             >
               {pending

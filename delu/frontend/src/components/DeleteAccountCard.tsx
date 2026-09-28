@@ -47,13 +47,13 @@ export function DeleteAccountCard({ onDeleted }: { onDeleted: () => void }) {
                 required
               />
             </div>
-            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+            {error ? <p className="text-sm text-ink">{error}</p> : null}
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="outline"
                 onClick={confirm}
                 disabled={pending || !password}
-                className="border-red-300 text-red-700 hover:bg-red-50"
+                className="border-ink-soft text-ink hover:bg-brand-tint"
               >
                 {pending ? "Deleting…" : "Delete everything"}
               </Button>
@@ -75,7 +75,7 @@ export function DeleteAccountCard({ onDeleted }: { onDeleted: () => void }) {
             <Button
               variant="outline"
               onClick={() => setArming(true)}
-              className="border-red-300 text-red-700 hover:bg-red-50"
+              className="border-ink-soft text-ink hover:bg-brand-tint"
             >
               Delete account
             </Button>

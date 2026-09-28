@@ -164,19 +164,6 @@ export function unitFor(target: string): string {
   return "MW";
 }
 
-export const SERIES_ACCENTS: Record<string, string> = {
-  load_actual_mw: "#4ade80",
-  gen_actual_total_mwh: "#c084fc",
-  gen_actual_wind_offshore_mwh: "#38bdf8",
-  gen_actual_wind_onshore_mwh: "#2dd4bf",
-  gen_actual_photovoltaics_mwh: "#fbbf24",
-  price_sdac_seq1_eur_mwh: "#fb7185",
-};
-
-export function accentFor(target: string): string {
-  return SERIES_ACCENTS[target] ?? "#4ade80";
-}
-
 const runDayFmt = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Berlin",
   weekday: "short",

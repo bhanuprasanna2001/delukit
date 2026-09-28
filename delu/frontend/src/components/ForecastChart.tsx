@@ -6,20 +6,20 @@ import { DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, 
 import { CanvasRenderer } from "echarts/renderers";
 import { berlinLong, targetLabel, type ForecastData } from "../lib/api";
 import {
-  ACTUAL_COLOR, CHART_COLORS, HOUR, chartOptions, fitWindow, forecastDomain,
+  CHART_PALETTE, HOUR, chartOptions, fitWindow, forecastColor, forecastDomain,
   formatDay, formatTimestamp, formatValue, windowFromZoom, withTimeGaps, zoomWindow,
-  type ChartVisibility,
+  type ChartTheme, type ChartVisibility,
 } from "./forecast-chart-options";
 import "./forecast-chart.css";
 
 registerCharts([LineChart, DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, CanvasRenderer]);
 
-export function ForecastChart({ data, unit }: { data: ForecastData; unit: string }) {
+export function ForecastChart({ data, unit, theme }: { data: ForecastData; unit: string; theme: ChartTheme }) {
   const chartData = useMemo(() => withTimeGaps(data), [data]);
-  return <InteractiveForecastChart data={chartData} unit={unit} />;
+  return <InteractiveForecastChart data={chartData} unit={unit} theme={theme} />;
 }
 
-function InteractiveForecastChart({ data, unit }: { data: ForecastData; unit: string }) {
+function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; unit: string; theme: ChartTheme }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
@@ -31,14 +31,15 @@ function InteractiveForecastChart({ data, unit }: { data: ForecastData; unit: st
   const [fullscreen, setFullscreen] = useState(false);
   const [inspectedIndex, setInspectedIndex] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const accent = CHART_COLORS[data.meta.target] ?? CHART_COLORS.load_actual_mw;
+  const accent = forecastColor(data.meta.target, theme);
+  const palette = CHART_PALETTE[theme];
   const hasActual = data.actual.some((value) => value !== null);
   const hasForecast = data.p50.some((value) => value !== null);
   const hasIntervals = data.p10?.some((value, i) => value != null && data.p90?.[i] != null) ?? false;
   const fullRange = Math.abs(window.start - domain.start) < 1000 && Math.abs(window.end - domain.end) < 1000;
   const duration = window.end - window.start;
   const inspect = useCallback((index: number) => setInspectedIndex(index), []);
-  const options = useMemo(() => chartOptions({ data, unit, window, visibility, compact, onInspect: inspect }), [data, unit, window, visibility, compact, inspect]);
+  const options = useMemo(() => chartOptions({ data, unit, window, visibility, compact, theme, onInspect: inspect }), [data, unit, window, visibility, compact, theme, inspect]);
 
   useEffect(() => {
     const plot = plotRef.current;
@@ -97,33 +98,37 @@ function InteractiveForecastChart({ data, unit }: { data: ForecastData; unit: st
     const chart = chartRef.current;
     if (!chart) return;
     const image = new Image();
-    image.src = chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#fff", excludeComponents: ["toolbox"] });
+    image.src = chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: palette.surface, excludeComponents: ["toolbox"] });
     await image.decode();
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(image.width, 1400);
     canvas.height = image.height + 220;
     const context = canvas.getContext("2d");
     if (!context) return;
-    context.fillStyle = "#fff";
+    context.fillStyle = palette.surface;
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#17211c";
+    context.fillStyle = palette.text;
     context.font = "600 32px sans-serif";
     context.fillText(`${targetLabel(data.meta.target)} forecast · ${data.meta.span === "d10" ? "10-day horizon" : "Day-ahead"} · DE–LU`, 48, 48);
-    context.fillStyle = "#4b5b51";
+    context.fillStyle = palette.muted;
     context.font = "22px sans-serif";
     context.fillText(`${formatTimestamp(window.start)} to ${formatTimestamp(window.end)}`, 48, 86);
     const keys = [
       { label: "Forecast · P50", color: accent, band: false, visible: visibility.forecast },
-      { label: "Actual", color: ACTUAL_COLOR, band: false, visible: visibility.actual },
+      { label: "Actual", color: palette.actual, band: false, visible: visibility.actual },
       { label: "P10–P90 interval", color: accent, band: true, visible: hasIntervals && visibility.forecast && visibility.intervals },
     ];
     let legendX = 48;
     for (const key of keys.filter((entry) => entry.visible)) {
       context.fillStyle = key.color;
-      context.globalAlpha = key.band ? 0.25 : 1;
-      context.fillRect(legendX, key.band ? 105 : 111, 32, key.band ? 16 : 3);
+      context.globalAlpha = key.band ? palette.bandKeyOpacity : 1;
+      if (key.label === "Actual") {
+        for (let x = 0; x < 32; x += 9) context.fillRect(legendX + x, 111, 5, 3);
+      } else {
+        context.fillRect(legendX, key.band ? 105 : 111, 32, key.band ? 16 : 3);
+      }
       context.globalAlpha = 1;
-      context.fillStyle = "#4b5b51";
+      context.fillStyle = palette.muted;
       context.fillText(key.label, legendX + 44, 120);
       legendX += 44 + context.measureText(key.label).width + 40;
     }
@@ -190,10 +195,10 @@ function InteractiveForecastChart({ data, unit }: { data: ForecastData; unit: st
           <span className="forecast-line-key" style={{ backgroundColor: accent }} />Forecast · P50
         </button>
         <button type="button" aria-pressed={visibility.actual} disabled={!hasActual || !visibility.forecast || !hasForecast} onClick={() => setVisibility((current) => ({ ...current, actual: !current.actual }))}>
-          <span className="forecast-line-key" style={{ backgroundColor: ACTUAL_COLOR }} />Actual
+          <span className="forecast-line-key forecast-actual-key" style={{ color: palette.actual }} />Actual
         </button>
         {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide nested P10–P90 forecast intervals">
-          <span className="forecast-band-key" style={{ backgroundColor: accent }} />P10–P90 interval
+          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />P10–P90 interval
         </button> : null}
         <span className="forecast-chart-zone">Europe/Berlin</span>
       </div>

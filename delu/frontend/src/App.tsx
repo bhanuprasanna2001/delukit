@@ -1,4 +1,4 @@
-import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut } from "lucide-react";
+import { Download as DownloadIcon, Info, KeyRound, LineChart, LogOut, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { KeyReveal } from "./components/KeyReveal";
 import { ApiGuide } from "./components/ApiGuide";
@@ -27,6 +27,14 @@ export type View =
   | "contact"
   | "attribution";
 
+type Theme = "light" | "dark";
+
+function activeTheme(): Theme {
+  if (document.documentElement.dataset.theme === "dark") return "dark";
+  if (document.documentElement.dataset.theme === "light") return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
   const [state, setState] = useState<
     | { status: "pending" }
@@ -51,7 +59,7 @@ function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
       <CardContent className="grid gap-3">
         {state.status === "pending" ? <p className="text-sm">Confirming…</p> : null}
         {state.status === "error" ? (
-          <p className="text-sm text-red-700">{state.detail}</p>
+          <p className="text-sm text-ink">{state.detail}</p>
         ) : null}
         {state.status === "ok" ? (
           <div className="grid gap-3">
@@ -65,6 +73,7 @@ function VerifyPanel({ token, onDone }: { token: string; onDone: () => void }) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(activeTheme);
   const [view, setView] = useState<View>("forecasts");
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [verifyToken, setVerifyToken] = useState("");
@@ -88,6 +97,29 @@ export default function App() {
     }
     refreshMe();
   }, []);
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => {
+      let saved: string | null = null;
+      try { saved = window.localStorage.getItem("delu-theme"); } catch { /* Use the system preference. */ }
+      if (saved === "light" || saved === "dark") return;
+      const next = preference.matches ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      document.documentElement.classList.toggle("dark-mode", next === "dark");
+      setTheme(next);
+    };
+    preference.addEventListener("change", update);
+    return () => preference.removeEventListener("change", update);
+  }, []);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    document.documentElement.classList.toggle("dark-mode", next === "dark");
+    setTheme(next);
+    try { window.localStorage.setItem("delu-theme", next); } catch { /* Theme still applies for this visit. */ }
+  }
 
   async function signOut() {
     await logout().catch(() => undefined);
@@ -120,7 +152,7 @@ export default function App() {
               onClick={() => setView("forecasts")}
               className="flex cursor-pointer items-center gap-2"
             >
-              <img src="/delu.svg" alt="DELU logo" className="size-8 rounded-md" />
+              <img src="/delu.svg" alt="DELU logo" className="brand-mark size-8 rounded-md" />
               <span className="font-display text-lg font-bold tracking-tight">
                 DELU
               </span>
@@ -129,6 +161,7 @@ export default function App() {
               <Button
                 variant={view === "forecasts" ? "secondary" : "ghost"}
                 size="sm"
+                className="max-sm:[&_svg]:hidden"
                 onClick={() => setView("forecasts")}
               >
                 <LineChart />
@@ -137,6 +170,7 @@ export default function App() {
               <Button
                 variant={view === "download" ? "secondary" : "ghost"}
                 size="sm"
+                className="max-sm:[&_svg]:hidden"
                 onClick={() => setView("download")}
               >
                 <DownloadIcon />
@@ -145,6 +179,7 @@ export default function App() {
               <Button
                 variant={view === "dashboard" || view === "verify" ? "secondary" : "ghost"}
                 size="sm"
+                className="max-sm:[&_svg]:hidden"
                 onClick={() => setView("dashboard")}
               >
                 <KeyRound />
@@ -153,6 +188,7 @@ export default function App() {
               <Button
                 variant={view === "about" ? "secondary" : "ghost"}
                 size="sm"
+                className="max-sm:[&_svg]:hidden"
                 onClick={() => setView("about")}
               >
                 <Info />
@@ -160,6 +196,16 @@ export default function App() {
               </Button>
             </nav>
             <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                type="button"
+                onClick={toggleTheme}
+                aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+                title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+              >
+                {theme === "light" ? <Moon aria-hidden="true" /> : <Sun aria-hidden="true" />}
+              </Button>
               {me === undefined ? null : me ? (
                 <div className="flex items-center gap-2">
                   <span className="hidden text-sm text-ink-soft sm:inline">{me.email}</span>
@@ -184,7 +230,7 @@ export default function App() {
 
         {view === "forecasts" ? (
           <main className="flex min-h-0 flex-1 flex-col">
-            <Forecasts />
+            <Forecasts theme={theme} />
           </main>
         ) : (
           <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">
@@ -318,7 +364,7 @@ export default function App() {
             )}
           >
             <span className="flex items-center gap-1.5 font-medium text-ink-soft">
-              <img src="/delu.svg" alt="DELU logo" className="size-5 rounded" />
+              <img src="/delu.svg" alt="DELU logo" className="brand-mark size-5 rounded" />
               DELU
               <span className="font-normal text-ink-faint">
                 © {new Date().getFullYear()}

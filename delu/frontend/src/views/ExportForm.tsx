@@ -199,12 +199,12 @@ export function ExportForm({ go }: { go: (v: View) => void }) {
                 </div>
               ) : null}
               {derived.overLimit ? (
-                <p className="text-sm text-red-700">
+                <p className="text-sm text-ink">
                   That range spans {derived.gap} days. Shorten it to {MAX_GAP} days or less.
                 </p>
               ) : null}
               {!derived.contiguous && start && end ? (
-                <p className="text-sm text-red-700">End sits before start. Swap them to continue.</p>
+                <p className="text-sm text-ink">End sits before start. Swap them to continue.</p>
               ) : null}
             </div>
           </div>
@@ -289,7 +289,7 @@ export function ExportForm({ go }: { go: (v: View) => void }) {
           </p>
 
           <div aria-live="polite">
-            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+            {error ? <p className="text-sm text-ink">{error}</p> : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

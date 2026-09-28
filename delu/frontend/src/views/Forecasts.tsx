@@ -30,7 +30,7 @@ const GATE_INFO =
 const seg =
   "inline-flex h-8 cursor-pointer items-center rounded-[5px] px-3 text-sm font-medium transition-colors";
 
-export function Forecasts() {
+export function Forecasts({ theme }: { theme: "light" | "dark" }) {
   const [opts, setOpts] = useState<Options | null>(null);
   const [sel, setSel] = useState<Sel>(() => ({
     date: "",
@@ -199,7 +199,7 @@ export function Forecasts() {
                     seg,
                     "tnum",
                     eff?.gate === g
-                      ? "bg-ink text-white"
+                      ? "bg-ink text-on-brand"
                       : "text-ink-soft hover:text-ink disabled:opacity-35 disabled:hover:text-ink-soft",
                   )}
                 >
@@ -226,7 +226,7 @@ export function Forecasts() {
                   className={cn(
                     seg,
                     eff?.span === v
-                      ? "bg-ink text-white"
+                      ? "bg-ink text-on-brand"
                       : "text-ink-soft hover:text-ink disabled:opacity-35 disabled:hover:text-ink-soft",
                   )}
                 >
@@ -267,7 +267,7 @@ export function Forecasts() {
                   className={cn(
                     seg,
                     eff?.kind === v
-                      ? "bg-ink text-white"
+                      ? "bg-ink text-on-brand"
                       : "text-ink-soft hover:text-ink",
                   )}
                 >
@@ -280,7 +280,7 @@ export function Forecasts() {
       </div>
 
       {error ? (
-        <p className="flex-none pt-3 text-sm text-red-700">
+        <p className="flex-none pt-3 text-sm text-ink">
           Could not load the forecast: {error}
         </p>
       ) : null}
@@ -295,6 +295,7 @@ export function Forecasts() {
                 key={`${data.meta.date}-${data.meta.gate}-${data.meta.span}-${data.meta.target}-${eff?.kind}`}
                 data={data}
                 unit={unitFor(data.meta.target)}
+                theme={theme}
               />
             </Suspense>
           </div>

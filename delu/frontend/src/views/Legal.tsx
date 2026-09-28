@@ -264,7 +264,7 @@ function messageError(v: string): string | undefined {
 
 function FieldError({ id, message }: { id: string; message: string | undefined }) {
   return message ? (
-    <p id={id} className="flex items-center gap-1.5 text-[13px] text-red-700">
+    <p id={id} className="flex items-center gap-1.5 text-[13px] text-ink">
       <AlertCircle aria-hidden="true" className="size-3.5 shrink-0" />
       {message}
     </p>
@@ -283,7 +283,7 @@ function StatusMessage({ status, detail }: { status: "ok" | "error"; detail: str
   ) : (
     <p
       role="alert"
-      className="flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
+      className="flex items-center gap-2 rounded-md bg-brand-tint px-3 py-2 text-sm text-ink"
     >
       <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
       {detail}

@@ -18,7 +18,7 @@ const CARDS = [
   {
     icon: Database,
     title: "Actuals included",
-    body: "Every run carries the most recent realised values from ENTSO-E and SMARD, so each forecast can be judged against what really happened. The white line on the chart is measured history, not model output.",
+    body: "Every run carries the most recent realised values from ENTSO-E and SMARD, so each forecast can be judged against what really happened. The dashed line on the chart is measured history, not model output.",
   },
   {
     icon: KeyRound,
