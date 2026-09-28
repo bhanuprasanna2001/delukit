@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, Minus, MousePointer2, Move, Plus, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { init, use as registerCharts, type EChartsType } from "echarts/core";
 import { LineChart } from "echarts/charts";
 import { DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, TooltipComponent } from "echarts/components";
@@ -14,12 +14,12 @@ import "./forecast-chart.css";
 
 registerCharts([LineChart, DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, CanvasRenderer]);
 
-export function ForecastChart({ data, unit, theme }: { data: ForecastData; unit: string; theme: ChartTheme }) {
+export function ForecastChart({ data, unit, theme, controls }: { data: ForecastData; unit: string; theme: ChartTheme; controls: ReactNode }) {
   const chartData = useMemo(() => withTimeGaps(data), [data]);
-  return <InteractiveForecastChart data={chartData} unit={unit} theme={theme} />;
+  return <InteractiveForecastChart data={chartData} unit={unit} theme={theme} controls={controls} />;
 }
 
-function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; unit: string; theme: ChartTheme }) {
+function InteractiveForecastChart({ data, unit, theme, controls }: { data: ForecastData; unit: string; theme: ChartTheme; controls: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
@@ -158,6 +158,7 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
     <div className="forecast-chart" ref={rootRef}>
       <div className="forecast-chart-heading">
         <h2 className="forecast-chart-title">{title}</h2>
+        {controls}
       </div>
 
       <div className="forecast-chart-toolbar">
@@ -196,7 +197,6 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
         {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide nested P10–P90 forecast intervals">
           <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />P10–P90 interval
         </button> : null}
-        <span className="forecast-chart-zone">Europe/Berlin</span>
       </div>
 
       <div className="forecast-chart-canvas" ref={plotRef} tabIndex={0} role="group"
@@ -219,7 +219,10 @@ function InteractiveForecastChart({ data, unit, theme }: { data: ForecastData; u
       <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(domain.start)}</span><span>{formatDay(domain.end)}</span></div>
       <div className="forecast-chart-footer">
         <span className="forecast-window-label" aria-live="polite">{formatTimestamp(window.start)} <span aria-hidden="true">→</span> {formatTimestamp(window.end)}</span>
-        <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
+        <div className="forecast-chart-meta">
+          <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
+          <span>Europe/Berlin</span>
+        </div>
       </div>
       <span className="sr-only" role="status">{announcement}</span>
     </div>
