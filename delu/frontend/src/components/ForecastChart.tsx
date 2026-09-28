@@ -6,7 +6,7 @@ import { DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, 
 import { CanvasRenderer } from "echarts/renderers";
 import { berlinLong, targetLabel, type ForecastData } from "../lib/api";
 import {
-  CHART_PALETTE, HOUR, chartOptions, chartTimeScale, fitWindow, forecastColor,
+  CHART_PALETTE, DEFAULT_CHART_VISIBILITY, HOUR, availableIntervals, chartOptions, chartTimeScale, fitWindow, forecastColor,
   formatDay, formatTimestamp, formatValue, windowFromZoom, withTimeGaps, zoomWindow,
   type ChartTheme, type ChartVisibility,
 } from "./forecast-chart-options";
@@ -26,7 +26,7 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const scale = useMemo(() => chartTimeScale(data), [data]);
   const domain = scale.domain;
   const [window, setWindow] = useState(domain);
-  const [visibility, setVisibility] = useState<ChartVisibility>({ actual: true, forecast: true, intervals: true });
+  const [visibility, setVisibility] = useState<ChartVisibility>(DEFAULT_CHART_VISIBILITY);
   const [compact, setCompact] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -36,7 +36,7 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const palette = CHART_PALETTE[theme];
   const hasActual = data.actual.some((value) => value !== null);
   const hasForecast = data.p50.some((value) => value !== null);
-  const hasIntervals = data.p10?.some((value, i) => value != null && data.p90?.[i] != null) ?? false;
+  const intervals = useMemo(() => availableIntervals(data), [data]);
   const fullRange = Math.abs(window.start - domain.start) < 1000 && Math.abs(window.end - domain.end) < 1000;
   const duration = scale.unproject(window.end) - scale.unproject(window.start);
   const inspect = useCallback((index: number) => setInspectedIndex(index), []);
@@ -100,43 +100,78 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const exportImage = async () => {
     const chart = chartRef.current;
     if (!chart) return;
+    await document.fonts.ready;
     const image = new Image();
     image.src = chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: palette.surface, excludeComponents: ["toolbox"] });
     await image.decode();
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(image.width, 1400);
-    canvas.height = image.height + 220;
+    canvas.width = image.width;
+    const exportScale = Math.max(0.65, Math.min(1, canvas.width / 2400));
+    const edge = 48 * exportScale;
+    const bodyFont = `Inter, ui-sans-serif, system-ui, sans-serif`;
+    const displayFont = `"Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif`;
+    const visibleKeys = [
+      ...(visibility.forecast ? [{ label: "Median forecast · P50", color: accent, band: false, dashed: false }] : []),
+      ...(visibility.actual ? [{ label: "Actual", color: palette.actual, band: false, dashed: true }] : []),
+      ...(visibility.forecast ? intervals.filter(({ key }) => visibility.ranges[key]).map(({ label }) => ({ label, color: accent, band: true, dashed: false })) : []),
+    ];
+    const measure = canvas.getContext("2d");
+    if (!measure) return;
+    measure.font = `500 ${24 * exportScale}px ${bodyFont}`;
+    const legendRows: { x: number; y: number; label: string; color: string; band: boolean; dashed: boolean }[] = [];
+    let legendX = edge;
+    let legendY = 164 * exportScale;
+    for (const key of visibleKeys) {
+      const width = 36 * exportScale + measure.measureText(key.label).width + 32 * exportScale;
+      if (legendX > edge && legendX + width > canvas.width - edge) {
+        legendX = edge;
+        legendY += 44 * exportScale;
+      }
+      legendRows.push({ ...key, x: legendX, y: legendY });
+      legendX += width;
+    }
+    const headerHeight = legendY + 68 * exportScale;
+    measure.font = `500 ${24 * exportScale}px ${bodyFont}`;
+    const builtLabel = `Built ${berlinLong(data.meta.generated_at)}`;
+    const zoneLabel = `Europe/Berlin · ${unit}`;
+    const footerWraps = measure.measureText(builtLabel).width + measure.measureText(zoneLabel).width + 3 * edge > canvas.width;
+    const footerHeight = (footerWraps ? 146 : 108) * exportScale;
+    canvas.height = image.height + headerHeight + footerHeight;
     const context = canvas.getContext("2d");
     if (!context) return;
     context.fillStyle = palette.surface;
     context.fillRect(0, 0, canvas.width, canvas.height);
+    context.textBaseline = "top";
     context.fillStyle = palette.text;
-    context.font = "600 32px sans-serif";
-    context.fillText(`${targetLabel(data.meta.target)} forecast`, 48, 48);
+    context.font = `600 ${50 * exportScale}px ${displayFont}`;
+    context.fillText(`${targetLabel(data.meta.target)} forecast`, edge, 28 * exportScale, canvas.width - 2 * edge);
     context.fillStyle = palette.muted;
-    context.font = "22px sans-serif";
-    context.fillText(`${formatTimestamp(scale.unproject(window.start))} to ${formatTimestamp(scale.unproject(window.end))}`, 48, 86);
-    const keys = [
-      { label: "Median forecast · P50", color: accent, band: false, visible: visibility.forecast },
-      { label: "Actual", color: palette.actual, band: false, visible: visibility.actual },
-      { label: "Quantile ranges · P10–P90", color: accent, band: true, visible: hasIntervals && visibility.forecast && visibility.intervals },
-    ];
-    let legendX = 48;
-    for (const key of keys.filter((entry) => entry.visible)) {
+    context.font = `400 ${27 * exportScale}px ${bodyFont}`;
+    context.fillText(`${formatTimestamp(scale.unproject(window.start))} – ${formatTimestamp(scale.unproject(window.end))}`, edge, 96 * exportScale, canvas.width - 2 * edge);
+    context.fillStyle = palette.line;
+    context.fillRect(edge, 144 * exportScale, canvas.width - 2 * edge, exportScale);
+    context.font = `500 ${24 * exportScale}px ${bodyFont}`;
+    for (const key of legendRows) {
       context.fillStyle = key.color;
       context.globalAlpha = key.band ? palette.bandKeyOpacity : 1;
-      if (key.label === "Actual") {
-        for (let x = 0; x < 32; x += 9) context.fillRect(legendX + x, 111, 5, 3);
+      if (key.dashed) {
+        for (let x = 0; x < 26; x += 9) context.fillRect(key.x + x * exportScale, key.y + 13 * exportScale, 6 * exportScale, 2 * exportScale);
       } else {
-        context.fillRect(legendX, key.band ? 105 : 111, 32, key.band ? 16 : 3);
+        context.fillRect(key.x, key.y + (key.band ? 7 : 13) * exportScale, 26 * exportScale, (key.band ? 12 : 2) * exportScale);
       }
       context.globalAlpha = 1;
       context.fillStyle = palette.muted;
-      context.fillText(key.label, legendX + 44, 120);
-      legendX += 44 + context.measureText(key.label).width + 40;
+      context.fillText(key.label, key.x + 36 * exportScale, key.y);
     }
-    context.drawImage(image, 0, 140);
-    context.fillText(`DELU · Built ${berlinLong(data.meta.generated_at)} · Europe/Berlin · ${unit}${scale.shortenedGap ? " · Empty time gap shortened" : ""}`, 48, canvas.height - 32);
+    context.drawImage(image, 0, headerHeight);
+    const footerTop = headerHeight + image.height;
+    context.fillStyle = palette.line;
+    context.fillRect(edge, footerTop + 22 * exportScale, canvas.width - 2 * edge, exportScale);
+    context.fillStyle = palette.muted;
+    context.font = `500 ${24 * exportScale}px ${bodyFont}`;
+    context.fillText(builtLabel, edge, footerTop + 48 * exportScale);
+    context.textAlign = footerWraps ? "left" : "right";
+    context.fillText(zoneLabel, footerWraps ? edge : canvas.width - edge, footerTop + (footerWraps ? 88 : 48) * exportScale);
     const link = document.createElement("a");
     link.download = `delu-${data.meta.target}-${data.meta.date}-${data.meta.span}.png`;
     link.href = canvas.toDataURL("image/png");
@@ -197,10 +232,9 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
         <button type="button" aria-pressed={visibility.actual} disabled={!hasActual || !visibility.forecast || !hasForecast} onClick={() => setVisibility((current) => ({ ...current, actual: !current.actual }))}>
           <span className="forecast-line-key forecast-actual-key" style={{ color: palette.actual }} />Actual
         </button>
-        {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide P10–P90, P20–P80, P30–P70, and P40–P60 quantile ranges">
-          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />Quantile ranges · P10–P90
-        </button> : null}
-        {scale.shortenedGap ? <span className="forecast-chart-gap-note" title="The empty period between the last actual value and the forecast is shortened on this timeline.">Empty time gap shortened</span> : null}
+        {intervals.map(({ key, label }) => <button key={key} type="button" aria-pressed={visibility.ranges[key]} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, ranges: { ...current.ranges, [key]: !current.ranges[key] } }))} title={`Show or hide ${label} range`}>
+          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />{label}
+        </button>)}
       </div>
 
       <div className="forecast-chart-canvas" ref={plotRef} tabIndex={0} role="group"

@@ -50,7 +50,26 @@ export interface TimeWindow {
 export interface ChartVisibility {
   actual: boolean;
   forecast: boolean;
-  intervals: boolean;
+  ranges: Record<IntervalKey, boolean>;
+}
+
+export const INTERVALS = [
+  { key: "p10p90", label: "P10–P90", lower: "p10", upper: "p90" },
+  { key: "p20p80", label: "P20–P80", lower: "p20", upper: "p80" },
+  { key: "p30p70", label: "P30–P70", lower: "p30", upper: "p70" },
+  { key: "p40p60", label: "P40–P60", lower: "p40", upper: "p60" },
+] as const;
+
+export type IntervalKey = typeof INTERVALS[number]["key"];
+
+export const DEFAULT_CHART_VISIBILITY: ChartVisibility = {
+  actual: true, forecast: true,
+  ranges: { p10p90: true, p20p80: true, p30p70: true, p40p60: true },
+};
+
+export function availableIntervals(data: ForecastData) {
+  return INTERVALS.filter(({ lower, upper }) =>
+    data[lower]?.some((value, index) => value != null && data[upper]?.[index] != null));
 }
 
 const timeFormat = new Intl.DateTimeFormat("en-GB", {
@@ -164,7 +183,13 @@ export function visibleExtent(data: ForecastData, window: TimeWindow, visibility
     const after = scale.project(Date.parse(data.timestamps[Math.min(data.timestamps.length - 1, i + 1)]));
     if (time < window.start && after < window.start || time > window.end && before > window.end) continue;
     const values = [visibility.actual ? data.actual[i] : null, visibility.forecast ? data.p50[i] : null];
-    if (visibility.forecast && visibility.intervals) values.push(data.p10?.[i] ?? null, data.p90?.[i] ?? null);
+    if (visibility.forecast) {
+      for (const { key, lower, upper } of INTERVALS) {
+        const low = data[lower]?.[i];
+        const high = data[upper]?.[i];
+        if (visibility.ranges[key] && low != null && high != null) values.push(low, high);
+      }
+    }
     for (const value of values) {
       if (value != null && Number.isFinite(value)) {
         min = Math.min(min, value);
@@ -191,15 +216,13 @@ export function tooltipHtml(data: ForecastData, index: number, unit: string, vis
   const value = (number: number) => `${formatValue(number)} <small>${safeUnit}</small>`;
   const pointRow = (label: string, number: number, ink: string) =>
     `<div class="forecast-tooltip-row"><span><i style="background:${ink}"></i>${label}</span><strong>${value(number)}</strong></div>`;
-  const pairs = [
-    ["P10–P90", data.p10?.[index], data.p90?.[index]],
-    ["P20–P80", data.p20?.[index], data.p80?.[index]],
-    ["P30–P70", data.p30?.[index], data.p70?.[index]],
-    ["P40–P60", data.p40?.[index], data.p60?.[index]],
-  ] as const;
-  const ranges = visibility.forecast && visibility.intervals ? pairs
-    .flatMap(([label, lower, upper]) => lower != null && upper != null
-      ? [`<div class="forecast-tooltip-row forecast-tooltip-range"><span>${label}</span><strong>${formatValue(lower)}–${value(upper)}</strong></div>`] : []).join("") : "";
+  const ranges = visibility.forecast ? INTERVALS
+    .flatMap(({ key, label, lower, upper }) => {
+      const low = data[lower]?.[index];
+      const high = data[upper]?.[index];
+      return visibility.ranges[key] && low != null && high != null
+        ? [`<div class="forecast-tooltip-row forecast-tooltip-range"><span>${label}</span><strong>${formatValue(low)}–${value(high)}</strong></div>`] : [];
+    }).join("") : "";
   return `<div class="forecast-tooltip"><div class="forecast-tooltip-time">${escapeHtml(formatTimestamp(Date.parse(timestamp)))}</div>${visibility.forecast && median != null ? pointRow("P50 · median", median, color) : ""}${visibility.actual && actual != null ? pointRow("Actual", actual, CHART_PALETTE[theme].actual) : ""}${ranges ? `<div class="forecast-tooltip-ranges">${ranges}</div>` : ""}${visibility.forecast && visibility.actual && actual != null && median != null ? pointRow("Actual − median", actual - median, CHART_PALETTE[theme].actual) : ""}</div>`;
 }
 
@@ -259,18 +282,17 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
     ...line("Actual", data.actual, palette.actual),
     lineStyle: { color: palette.actual, width: 2, type: "dashed" },
   });
-  if (visibility.forecast && visibility.intervals) {
-    const bands = [
-      [data.p10, data.p90, "80%"], [data.p20, data.p80, "60%"],
-      [data.p30, data.p70, "40%"], [data.p40, data.p60, "20%"],
-    ] as const;
-    for (const [lower, upper, name] of bands) {
+  if (visibility.forecast) {
+    for (const { key, label, lower: lowerKey, upper: upperKey } of INTERVALS) {
+      if (!visibility.ranges[key]) continue;
+      const lower = data[lowerKey];
+      const upper = data[upperKey];
       if (!lower || !upper) continue;
       const base = lower.map((value, i) => value != null && upper[i] != null ? value : null);
       const width = upper.map((value, i) => value != null && lower[i] != null ? value - lower[i] : null);
       series.push(
-        { ...line(`${name} base`, base, "transparent"), stack: name, stackStrategy: "all", silent: true, z: 1, tooltip: { show: false } },
-        { ...line(`${name} interval`, width, "transparent"), stack: name, stackStrategy: "all", silent: true, z: 1,
+        { ...line(`${label} base`, base, "transparent"), stack: label, stackStrategy: "all", silent: true, z: 1, tooltip: { show: false } },
+        { ...line(`${label} interval`, width, "transparent"), stack: label, stackStrategy: "all", silent: true, z: 1,
           areaStyle: { color: accent, opacity: palette.bandOpacity }, tooltip: { show: false } },
       );
     }
