@@ -36,6 +36,7 @@
 .forecast-line-key { display: inline-block; width: 20px; height: 2px; border-radius: 1px; }
 .forecast-actual-key { height: 0; background: none; border-top: 2px dashed currentColor; }
 .forecast-band-key { display: inline-block; width: 20px; height: 10px; border-radius: 2px; }
+.forecast-chart-gap-note { margin-left: auto; color: var(--color-ink-soft); font-size: 11px; }
 .forecast-chart-canvas { flex: 1; min-height: 300px; min-width: 0; width: 100%; touch-action: pan-y; }
 .forecast-chart-canvas:focus-visible { outline-offset: -3px; }
 .forecast-navigator-labels { position: relative; display: flex; justify-content: space-between; gap: 8px; padding: 0 28px 10px 72px; margin-top: -10px; pointer-events: none; font-size: 10px; color: var(--color-ink-soft); }
@@ -43,13 +44,16 @@
 .forecast-chart-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; margin-left: auto; }
 .forecast-window-label { color: var(--color-ink); }
 .forecast-window-label > span { padding: 0 5px; color: var(--color-ink-faint); }
-.forecast-tooltip { padding: 12px 14px; min-width: 242px; color: var(--color-ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 12px; font-variant-numeric: tabular-nums; }
-.forecast-tooltip-time { color: var(--color-ink-soft); font-size: 11px; margin-bottom: 10px; }
-.forecast-tooltip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; margin-top: 7px; }
+.forecast-tooltip { width: max-content; max-width: min(90vw, 340px); padding: 10px 12px; color: var(--color-ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-variant-numeric: tabular-nums; }
+.forecast-tooltip-time { color: var(--color-ink-soft); font-size: 11px; margin-bottom: 7px; }
+.forecast-tooltip-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-top: 5px; white-space: nowrap; }
 .forecast-tooltip-row > span { display: flex; align-items: center; gap: 7px; color: var(--color-ink-soft); }
 .forecast-tooltip-row i { width: 6px; height: 6px; border-radius: 50%; }
 .forecast-tooltip-row strong { font-weight: 600; }
 .forecast-tooltip-row small { font-size: 10px; font-weight: 400; color: var(--color-ink-soft); }
+.forecast-tooltip-ranges { margin-top: 7px; padding-top: 4px; border-top: 1px solid var(--color-line); }
+.forecast-tooltip-range > span { padding-left: 13px; }
+.forecast-tooltip-range strong { font-weight: 500; }
 .forecast-chart-empty { position: absolute; top: 55%; width: 100%; text-align: center; font-size: 14px; color: var(--color-ink-soft); }
 @media (max-width: 640px) {
   .forecast-chart { min-height: 590px; }
@@ -64,8 +68,9 @@
   .forecast-chart-tools > div + div { margin-left: 3px; padding-left: 3px; }
   .forecast-chart-legend { padding: 8px 16px 0; gap: 0 14px; }
   .forecast-chart-legend button { font-size: 11px; gap: 6px; }
+  .forecast-chart-gap-note { width: 100%; margin-left: 0; }
   .forecast-navigator-labels { padding-left: 54px; padding-right: 18px; font-size: 9px; }
   .forecast-chart-footer { padding: 10px 16px; font-size: 10px; line-height: 1.8; }
-  .forecast-tooltip { min-width: 210px; padding: 10px; font-size: 11px; }
-  .forecast-tooltip-row { gap: 14px; }
+  .forecast-tooltip { padding: 9px 10px; }
+  .forecast-tooltip-row { gap: 10px; }
 }

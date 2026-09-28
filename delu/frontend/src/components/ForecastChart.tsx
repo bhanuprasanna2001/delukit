@@ -6,7 +6,7 @@ import { DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, 
 import { CanvasRenderer } from "echarts/renderers";
 import { berlinLong, targetLabel, type ForecastData } from "../lib/api";
 import {
-  CHART_PALETTE, HOUR, chartOptions, fitWindow, forecastColor, forecastDomain,
+  CHART_PALETTE, HOUR, chartOptions, chartTimeScale, fitWindow, forecastColor,
   formatDay, formatTimestamp, formatValue, windowFromZoom, withTimeGaps, zoomWindow,
   type ChartTheme, type ChartVisibility,
 } from "./forecast-chart-options";
@@ -23,7 +23,8 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const rootRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
-  const domain = useMemo(() => forecastDomain(data) ?? { start: 0, end: HOUR }, [data]);
+  const scale = useMemo(() => chartTimeScale(data), [data]);
+  const domain = scale.domain;
   const [window, setWindow] = useState(domain);
   const [visibility, setVisibility] = useState<ChartVisibility>({ actual: true, forecast: true, intervals: true });
   const [compact, setCompact] = useState(false);
@@ -37,7 +38,7 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const hasForecast = data.p50.some((value) => value !== null);
   const hasIntervals = data.p10?.some((value, i) => value != null && data.p90?.[i] != null) ?? false;
   const fullRange = Math.abs(window.start - domain.start) < 1000 && Math.abs(window.end - domain.end) < 1000;
-  const duration = window.end - window.start;
+  const duration = scale.unproject(window.end) - scale.unproject(window.start);
   const inspect = useCallback((index: number) => setInspectedIndex(index), []);
   const options = useMemo(() => chartOptions({ data, unit, window, visibility, compact, theme, onInspect: inspect }), [data, unit, window, visibility, compact, theme, inspect]);
 
@@ -84,8 +85,10 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
   const zoom = (factor: number) => setWindow((current) => zoomWindow(current, factor, domain));
   const selectHours = (hours: number) => {
     const firstForecast = data.p50.findIndex((value) => value !== null);
-    const forecastStart = firstForecast < 0 ? domain.start : Date.parse(data.timestamps[firstForecast]);
-    setWindow(fitWindow(fullRange ? forecastStart : window.start, hours * HOUR, domain));
+    const forecastStart = firstForecast < 0 ? scale.unproject(domain.start) : Date.parse(data.timestamps[firstForecast]);
+    const realEnd = Math.min((fullRange ? forecastStart : scale.unproject(window.start)) + hours * HOUR, scale.unproject(domain.end));
+    const realStart = Math.max(scale.unproject(domain.start), realEnd - hours * HOUR);
+    setWindow({ start: scale.project(realStart), end: scale.project(realEnd) });
     setInspectedIndex(null);
   };
   const toggleFullscreen = async () => {
@@ -112,11 +115,11 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
     context.fillText(`${targetLabel(data.meta.target)} forecast`, 48, 48);
     context.fillStyle = palette.muted;
     context.font = "22px sans-serif";
-    context.fillText(`${formatTimestamp(window.start)} to ${formatTimestamp(window.end)}`, 48, 86);
+    context.fillText(`${formatTimestamp(scale.unproject(window.start))} to ${formatTimestamp(scale.unproject(window.end))}`, 48, 86);
     const keys = [
-      { label: "Forecast · P50", color: accent, band: false, visible: visibility.forecast },
+      { label: "Median forecast · P50", color: accent, band: false, visible: visibility.forecast },
       { label: "Actual", color: palette.actual, band: false, visible: visibility.actual },
-      { label: "P10–P90 interval", color: accent, band: true, visible: hasIntervals && visibility.forecast && visibility.intervals },
+      { label: "Quantile ranges · P10–P90", color: accent, band: true, visible: hasIntervals && visibility.forecast && visibility.intervals },
     ];
     let legendX = 48;
     for (const key of keys.filter((entry) => entry.visible)) {
@@ -133,22 +136,22 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
       legendX += 44 + context.measureText(key.label).width + 40;
     }
     context.drawImage(image, 0, 140);
-    context.fillText(`DELU · Built ${berlinLong(data.meta.generated_at)} · Europe/Berlin · ${unit}`, 48, canvas.height - 32);
+    context.fillText(`DELU · Built ${berlinLong(data.meta.generated_at)} · Europe/Berlin · ${unit}${scale.shortenedGap ? " · Empty time gap shortened" : ""}`, 48, canvas.height - 32);
     const link = document.createElement("a");
     link.download = `delu-${data.meta.target}-${data.meta.date}-${data.meta.span}.png`;
     link.href = canvas.toDataURL("image/png");
     link.click(); setAnnouncement("Chart image saved.");
   };
   const inspectPoint = (direction: number, edge?: "start" | "end") => {
-    const first = Math.max(0, data.timestamps.findIndex((value) => Date.parse(value) >= window.start));
-    const last = data.timestamps.findLastIndex((value) => Date.parse(value) <= window.end);
+    const first = Math.max(0, data.timestamps.findIndex((value) => scale.project(Date.parse(value)) >= window.start));
+    const last = data.timestamps.findLastIndex((value) => scale.project(Date.parse(value)) <= window.end);
     const index = edge === "start" ? first : edge === "end" ? last : Math.max(first, Math.min(last, (inspectedIndex ?? first - direction) + direction));
     if (index < 0) return;
     setInspectedIndex(index);
     chartRef.current?.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: index });
     const forecast = visibility.forecast ? data.p50[index] : null;
     const actual = visibility.actual ? data.actual[index] : null;
-    setAnnouncement(`${formatTimestamp(Date.parse(data.timestamps[index]))}. ${forecast != null ? `Forecast ${formatValue(forecast)} ${unit}.` : ""} ${actual != null ? `Actual ${formatValue(actual)} ${unit}.` : ""}`);
+    setAnnouncement(`${formatTimestamp(Date.parse(data.timestamps[index]))}. ${forecast != null ? `Median forecast P50 ${formatValue(forecast)} ${unit}.` : ""} ${actual != null ? `Actual ${formatValue(actual)} ${unit}.` : ""}`);
   };
   const presets = data.meta.span === "d10" ? [{ label: "24h", hours: 24 }, { label: "48h", hours: 48 }, { label: "7d", hours: 168 }]
     : [{ label: "6h", hours: 6 }, { label: "12h", hours: 12 }, { label: "24h", hours: 24 }];
@@ -164,7 +167,7 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
       <div className="forecast-chart-toolbar">
         <div className="forecast-range-presets" role="group" aria-label="Visible time range">
           <button type="button" aria-pressed={fullRange} onClick={reset}>Full horizon</button>
-          {presets.filter(({ hours }) => hours * HOUR < domain.end - domain.start).map(({ label, hours }) => (
+          {presets.filter(({ hours }) => hours * HOUR < scale.unproject(domain.end) - scale.unproject(domain.start)).map(({ label, hours }) => (
             <button key={label} type="button" aria-pressed={!fullRange && Math.abs(duration - hours * HOUR) < 1000} onClick={() => selectHours(hours)}>{label}</button>
           ))}
         </div>
@@ -189,14 +192,15 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
 
       <div className="forecast-chart-legend" role="group" aria-label="Chart series">
         <button type="button" aria-pressed={visibility.forecast} disabled={!hasForecast || !visibility.actual || !hasActual} onClick={() => setVisibility((current) => ({ ...current, forecast: !current.forecast }))}>
-          <span className="forecast-line-key" style={{ backgroundColor: accent }} />Forecast · P50
+          <span className="forecast-line-key" style={{ backgroundColor: accent }} />Median forecast · P50
         </button>
         <button type="button" aria-pressed={visibility.actual} disabled={!hasActual || !visibility.forecast || !hasForecast} onClick={() => setVisibility((current) => ({ ...current, actual: !current.actual }))}>
           <span className="forecast-line-key forecast-actual-key" style={{ color: palette.actual }} />Actual
         </button>
-        {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide nested P10–P90 forecast intervals">
-          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />P10–P90 interval
+        {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide P10–P90, P20–P80, P30–P70, and P40–P60 quantile ranges">
+          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />Quantile ranges · P10–P90
         </button> : null}
+        {scale.shortenedGap ? <span className="forecast-chart-gap-note" title="The empty period between the last actual value and the forecast is shortened on this timeline.">Empty time gap shortened</span> : null}
       </div>
 
       <div className="forecast-chart-canvas" ref={plotRef} tabIndex={0} role="group"
@@ -216,9 +220,9 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
         }}
       />
       {!hasForecast && !hasActual ? <p className="forecast-chart-empty">No values in this forecast.</p> : null}
-      <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(domain.start)}</span><span>{formatDay(domain.end)}</span></div>
+      <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(scale.unproject(domain.start))}</span><span>{formatDay(scale.unproject(domain.end))}</span></div>
       <div className="forecast-chart-footer">
-        <span className="forecast-window-label" aria-live="polite">{formatTimestamp(window.start)} <span aria-hidden="true">→</span> {formatTimestamp(window.end)}</span>
+        <span className="forecast-window-label" aria-live="polite">{formatTimestamp(scale.unproject(window.start))} <span aria-hidden="true">→</span> {formatTimestamp(scale.unproject(window.end))}</span>
         <div className="forecast-chart-meta">
           <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
           <span>Europe/Berlin</span>

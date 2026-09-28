@@ -47,9 +47,9 @@ The DELU Docker image copies the production build into FastAPI's static director
 
 ## Explore a forecast
 
-Both horizon choices open in full, including available historical actuals. Choose a range preset or drag the timeline handles to narrow the view. Drag the plot to pan. Select the pointer tool to drag a region for zooming, or hold Ctrl while scrolling. **Full horizon** resets the view.
+Both horizon choices open with all available values, including historical actuals. When the gap between the last actual and the first day-ahead forecast is long enough, the chart shortens that empty period so the forecast takes about 62% of the width. The chart labels the shortened gap and keeps the original timestamps in its labels and tooltips. Choose a range preset or drag the timeline handles to narrow the view. Drag the plot to pan. Select the pointer tool to drag a region for zooming, or hold Ctrl while scrolling. **Full horizon** resets the view.
 
-The legend toggles actuals and uncertainty intervals. The y-axis adapts to the visible data. Point forecasts have no area fill. Missing quarters break the plotted lines and bands. All time labels use Europe/Berlin; tooltips and range labels include the daylight-saving offset name.
+The legend toggles actuals and quantile ranges. The tooltip shows the P50 median and the available P10–P90, P20–P80, P30–P70, and P40–P60 ranges as paired values. The y-axis adapts to the visible data. Point forecasts have no area fill. Missing quarters break the plotted lines and bands. All time labels use Europe/Berlin; tooltips and range labels include the daylight-saving offset name.
 
 Focus the plot to inspect values with the arrow keys. Home and End select the visible edges. Plus and minus zoom, Shift with an arrow key pans, and Escape clears inspection. Native buttons provide keyboard access to the range presets, fullscreen, and PNG export.
 

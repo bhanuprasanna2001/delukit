@@ -93,6 +93,43 @@ export function forecastDomain(data: ForecastData): TimeWindow | null {
   return { start: Date.parse(data.timestamps[0]), end: Date.parse(data.timestamps.at(-1) ?? data.timestamps[0]) };
 }
 
+export function chartTimeScale(data: ForecastData) {
+  const realDomain = forecastDomain(data);
+  const identity = (time: number) => time;
+  if (!realDomain) return { domain: { start: 0, end: HOUR }, project: identity, unproject: identity, shortenedGap: null };
+
+  const firstForecast = data.p50.findIndex((value) => value !== null);
+  const lastActual = data.actual.findLastIndex((value, index) => value !== null && index < firstForecast);
+  if (firstForecast < 0 || lastActual < 0) {
+    return { domain: realDomain, project: identity, unproject: identity, shortenedGap: null };
+  }
+
+  const forecastStart = Date.parse(data.timestamps[firstForecast]);
+  const actualEnd = Date.parse(data.timestamps[lastActual]);
+  const gap = forecastStart - actualEnd;
+  const forecastDuration = realDomain.end - forecastStart;
+  const desiredPast = forecastDuration * (1 - 0.618) / 0.618;
+  const displayedGap = desiredPast - (actualEnd - realDomain.start);
+  if (gap <= 0 || forecastDuration <= 0 || displayedGap <= 0 || displayedGap >= gap) {
+    return { domain: realDomain, project: identity, unproject: identity, shortenedGap: null };
+  }
+
+  const removed = Math.round((gap - displayedGap) / HOUR) * HOUR;
+  if (removed <= 0 || removed >= gap) {
+    return { domain: realDomain, project: identity, unproject: identity, shortenedGap: null };
+  }
+  const shortenedGap = { start: actualEnd, end: forecastStart - removed };
+  const gapRatio = (gap - removed) / gap;
+  const project = (time: number) => time <= actualEnd ? time
+    : time < forecastStart ? actualEnd + (time - actualEnd) * gapRatio : time - removed;
+  const unproject = (time: number) => time <= actualEnd ? time
+    : time < shortenedGap.end ? actualEnd + (time - actualEnd) / gapRatio : time + removed;
+  return {
+    domain: { start: realDomain.start, end: realDomain.end - removed },
+    project, unproject, shortenedGap,
+  };
+}
+
 export function fitWindow(start: number, duration: number, domain: TimeWindow): TimeWindow {
   const width = Math.min(Math.max(duration, Math.min(HOUR, domain.end - domain.start)), domain.end - domain.start);
   const left = Math.max(domain.start, Math.min(start, domain.end - width));
@@ -118,12 +155,13 @@ export function windowFromZoom(event: unknown, domain: TimeWindow): TimeWindow |
 }
 
 export function visibleExtent(data: ForecastData, window: TimeWindow, visibility: ChartVisibility): [number, number] {
+  const scale = chartTimeScale(data);
   let min = Infinity;
   let max = -Infinity;
   for (let i = 0; i < data.timestamps.length; i++) {
-    const time = Date.parse(data.timestamps[i]);
-    const before = Date.parse(data.timestamps[Math.max(0, i - 1)]);
-    const after = Date.parse(data.timestamps[Math.min(data.timestamps.length - 1, i + 1)]);
+    const time = scale.project(Date.parse(data.timestamps[i]));
+    const before = scale.project(Date.parse(data.timestamps[Math.max(0, i - 1)]));
+    const after = scale.project(Date.parse(data.timestamps[Math.min(data.timestamps.length - 1, i + 1)]));
     if (time < window.start && after < window.start || time > window.end && before > window.end) continue;
     const values = [visibility.actual ? data.actual[i] : null, visibility.forecast ? data.p50[i] : null];
     if (visibility.forecast && visibility.intervals) values.push(data.p10?.[i] ?? null, data.p90?.[i] ?? null);
@@ -146,15 +184,23 @@ function escapeHtml(value: string): string {
 export function tooltipHtml(data: ForecastData, index: number, unit: string, visibility: ChartVisibility, theme: ChartTheme = "light"): string {
   const timestamp = data.timestamps[index];
   if (!timestamp) return "";
-  const rows: [string, number | null | undefined, string][] = [];
   const color = forecastColor(data.meta.target, theme);
-  if (visibility.forecast) rows.push(["Forecast · P50", data.p50[index], color]);
-  if (visibility.actual) rows.push(["Actual", data.actual[index], CHART_PALETTE[theme].actual]);
-  if (visibility.forecast && visibility.intervals) rows.push(["Upper · P90", data.p90?.[index], color], ["Lower · P10", data.p10?.[index], color]);
   const actual = data.actual[index];
   const median = data.p50[index];
-  if (visibility.forecast && visibility.actual && actual != null && median != null) rows.push(["Actual − forecast", actual - median, CHART_PALETTE[theme].actual]);
-  return `<div class="forecast-tooltip"><div class="forecast-tooltip-time">${escapeHtml(formatTimestamp(Date.parse(timestamp)))}</div>${rows.filter(([, value]) => value != null).map(([label, value, ink]) => `<div class="forecast-tooltip-row"><span><i style="background:${ink}"></i>${label}</span><strong>${value == null ? "" : formatValue(value)} <small>${escapeHtml(unit)}</small></strong></div>`).join("")}</div>`;
+  const safeUnit = escapeHtml(unit);
+  const value = (number: number) => `${formatValue(number)} <small>${safeUnit}</small>`;
+  const pointRow = (label: string, number: number, ink: string) =>
+    `<div class="forecast-tooltip-row"><span><i style="background:${ink}"></i>${label}</span><strong>${value(number)}</strong></div>`;
+  const pairs = [
+    ["P10–P90", data.p10?.[index], data.p90?.[index]],
+    ["P20–P80", data.p20?.[index], data.p80?.[index]],
+    ["P30–P70", data.p30?.[index], data.p70?.[index]],
+    ["P40–P60", data.p40?.[index], data.p60?.[index]],
+  ] as const;
+  const ranges = visibility.forecast && visibility.intervals ? pairs
+    .flatMap(([label, lower, upper]) => lower != null && upper != null
+      ? [`<div class="forecast-tooltip-row forecast-tooltip-range"><span>${label}</span><strong>${formatValue(lower)}–${value(upper)}</strong></div>`] : []).join("") : "";
+  return `<div class="forecast-tooltip"><div class="forecast-tooltip-time">${escapeHtml(formatTimestamp(Date.parse(timestamp)))}</div>${visibility.forecast && median != null ? pointRow("P50 · median", median, color) : ""}${visibility.actual && actual != null ? pointRow("Actual", actual, CHART_PALETTE[theme].actual) : ""}${ranges ? `<div class="forecast-tooltip-ranges">${ranges}</div>` : ""}${visibility.forecast && visibility.actual && actual != null && median != null ? pointRow("Actual − median", actual - median, CHART_PALETTE[theme].actual) : ""}</div>`;
 }
 
 export function chartOptions({ data, unit, window, visibility, compact, theme, onInspect }: {
@@ -166,13 +212,14 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
   theme: ChartTheme;
   onInspect: (index: number) => void;
 }): EChartsOption {
-  const times = data.timestamps.map(Date.parse);
-  const domain = forecastDomain(data) ?? window;
+  const scale = chartTimeScale(data);
+  const times = data.timestamps.map((timestamp) => scale.project(Date.parse(timestamp)));
+  const domain = scale.domain;
   const extent = Math.max(1, domain.end - domain.start);
   const accent = forecastColor(data.meta.target, theme);
   const palette = CHART_PALETTE[theme];
   const forecastStart = data.p50.findIndex((value) => value !== null);
-  const builtAt = Date.parse(data.meta.generated_at);
+  const builtAt = scale.project(Date.parse(data.meta.generated_at));
   const annotationNearRight = times[forecastStart] > window.start + (window.end - window.start) * 0.8;
   const buildNearLeft = builtAt < window.start + (window.end - window.start) * 0.08;
   const buildAlignment: "left" | "right" = buildNearLeft ? "left" : "right";
@@ -188,7 +235,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
   });
   const series: LineSeriesOption[] = [];
   if (visibility.forecast) series.push({
-    ...line("Forecast · P50", data.p50, accent),
+    ...line("Median forecast · P50", data.p50, accent),
     markLine: {
       silent: true, symbol: "none", animation: false,
       lineStyle: { color: palette.navigator, width: 1, type: "dashed" },
@@ -247,8 +294,12 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
         axisLine: { lineStyle: { color: palette.line } }, axisTick: { show: false }, splitLine: { show: false },
         splitNumber: compact ? 3 : 7,
         axisLabel: { color: palette.muted, fontSize: 11, margin: 14, hideOverlap: true,
-          formatter: (value: number) => window.end - window.start > 3 * 24 * HOUR
-            ? `\n${formatDay(value)}` : `${formatTime(value)}\n${formatDay(value)}`, lineHeight: 17 },
+          formatter: (value: number) => {
+            if (scale.shortenedGap && value > scale.shortenedGap.start && value < scale.shortenedGap.end) return "";
+            const realTime = scale.unproject(value);
+            return window.end - window.start > 3 * 24 * HOUR
+              ? `\n${formatDay(realTime)}` : `${formatTime(realTime)}\n${formatDay(realTime)}`;
+          }, lineHeight: 17 },
         axisPointer: { label: { show: false }, lineStyle: { color: palette.navigator, type: "dashed" } },
       },
       { type: "time", gridIndex: 1, min: domain.start, max: domain.end, show: false, boundaryGap: [0, 0] },
@@ -270,7 +321,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
       padding: 0, extraCssText: `box-shadow:0 6px 18px ${palette.shadow};border-radius:8px;`,
       axisPointer: { type: "line", snap: true }, transitionDuration: 0,
       formatter: (params) => {
-        const point = Array.isArray(params) ? params.find((entry) => entry.seriesName === "Forecast · P50" || entry.seriesName === "Actual") : params;
+        const point = Array.isArray(params) ? params.find((entry) => entry.seriesName === "Median forecast · P50" || entry.seriesName === "Actual") : params;
         if (!point || point.seriesName === "Full timeline") return "";
         onInspect(point.dataIndex);
         return tooltipHtml(data, point.dataIndex, unit, visibility, theme);
