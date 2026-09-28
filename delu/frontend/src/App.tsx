@@ -113,8 +113,8 @@ export default function App() {
             : "flex min-h-screen flex-col"
         }
       >
-        <header className="sticky top-0 z-40 h-14 flex-none border-b border-line bg-card/90 backdrop-blur">
-          <div className="mx-auto flex h-14 w-full max-w-[1800px] items-center gap-2 px-4 sm:px-6">
+        <header className="sticky top-0 z-40 flex-none border-b border-line bg-card/90 backdrop-blur">
+          <div className="mx-auto flex min-h-14 w-full max-w-[1800px] flex-wrap items-center gap-2 px-4 pt-2 sm:h-14 sm:flex-nowrap sm:px-6 sm:pt-0">
             <button
               type="button"
               onClick={() => setView("forecasts")}
@@ -125,7 +125,7 @@ export default function App() {
                 DELU
               </span>
             </button>
-            <nav className="ml-6 flex items-center gap-1">
+            <nav className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto pb-2 sm:order-none sm:ml-6 sm:w-auto sm:pb-0" aria-label="Main navigation">
               <Button
                 variant={view === "forecasts" ? "secondary" : "ghost"}
                 size="sm"

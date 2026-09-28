@@ -211,6 +211,29 @@ def test_forecast_load_with_actuals(tmp_dirs, actuals):
     )
 
 
+def test_forecast_aligns_sparse_actuals_to_shared_timestamps(tmp_dirs):
+    from backend import forecasts as F
+
+    _write_forecast(
+        tmp_dirs["forecasts"] / "2026-01-05" / "0530_d1", "load_actual_mw", n=4
+    )
+    pd.DataFrame(
+        {"load_actual_mw": [10.0, 30.0]},
+        index=pd.to_datetime(["2026-01-06T00:00Z", "2026-01-06T00:30Z"]),
+    ).to_parquet(tmp_dirs["clean"] / "entsoe.parquet")
+
+    result = F.load("2026-01-05", "0530", "d1", "load_actual_mw", "probabilistic")
+
+    assert result["timestamps"] == [
+        "2026-01-06T00:00:00+00:00",
+        "2026-01-06T00:15:00+00:00",
+        "2026-01-06T00:30:00+00:00",
+        "2026-01-06T00:45:00+00:00",
+    ]
+    assert result["actual"] == [10.0, None, 30.0, None]
+    assert result["p50"] == [2.0, 2.0, 2.0, 2.0]
+
+
 def test_legacy_three_quantile_forecast_remains_readable(tmp_dirs, actuals):
     from backend import forecasts as F
 

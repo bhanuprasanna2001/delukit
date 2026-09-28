@@ -1,6 +1,5 @@
 import { ChevronLeft, ChevronRight, Info } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { ForecastChart } from "../components/ForecastChart";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "../components/ui/card";
 import { Select } from "../components/ui/select";
 import { Tooltip } from "../components/ui/tooltip";
@@ -14,6 +13,8 @@ import {
   type Options,
 } from "../lib/api";
 import { cn } from "../lib/utils";
+
+const ForecastChart = lazy(() => import("../components/ForecastChart").then((module) => ({ default: module.ForecastChart })));
 
 interface Sel {
   date: string;
@@ -74,17 +75,21 @@ export function Forecasts() {
       setLoading(false);
       return;
     }
+    let current = true;
     setLoading(true);
     setError("");
     publicForecast(eff)
       .then((d) => {
+        if (!current) return;
         setData(d);
         setLoading(false);
       })
       .catch((e: Error) => {
+        if (!current) return;
         setError(e.message);
         setLoading(false);
       });
+    return () => { current = false; };
   }, [eff]);
 
   if (!opts) {
@@ -234,6 +239,7 @@ export function Forecasts() {
           <label className="grid gap-1 text-sm font-medium">
             Series
             <Select
+              aria-label="Series"
               value={eff?.target ?? ""}
               onChange={(e) => setSel((s) => ({ ...s, target: e.target.value }))}
             >
@@ -284,22 +290,13 @@ export function Forecasts() {
           <div className="min-h-0 flex-1 animate-pulse rounded-xl bg-line" />
         ) : (
           <div className="flex min-h-[380px] flex-1 flex-col overflow-hidden rounded-xl border border-line lg:min-h-0">
-            <ForecastChart
-              timestamps={data.timestamps}
-              p50={data.p50}
-              p10={data.p10}
-              p20={data.p20}
-              p30={data.p30}
-              p40={data.p40}
-              p60={data.p60}
-              p70={data.p70}
-              p80={data.p80}
-              p90={data.p90}
-              actual={data.actual}
-              unit={unitFor(data.meta.target)}
-              builtAt={data.meta.generated_at}
-              target={eff?.target ?? data.meta.target}
-            />
+            <Suspense fallback={<div className="min-h-[520px] flex-1 animate-pulse bg-card" aria-label="Loading chart" />}>
+              <ForecastChart
+                key={`${data.meta.date}-${data.meta.gate}-${data.meta.span}-${data.meta.target}-${eff?.kind}`}
+                data={data}
+                unit={unitFor(data.meta.target)}
+              />
+            </Suspense>
           </div>
         )}
       </div>

@@ -133,6 +133,13 @@ CHECKS: tuple[CheckSpec, ...] = (
         "Frontend Oxlint",
     ),
     CheckSpec(
+        "frontend-test",
+        "frontend",
+        "frontend-npm",
+        ("npm", "test"),
+        "Frontend chart behavior tests",
+    ),
+    CheckSpec(
         "frontend-build",
         "frontend",
         "frontend-npm",

@@ -351,6 +351,7 @@ def load(day: str, gate: str, span: str, target: str, kind: str) -> dict:
         ].dropna()
         idx = forecast_index.union(_datetime_index(actual.index))
         frame = frame.reindex(idx)
+        actual = actual.reindex(idx)
     else:
         idx = forecast_index
         actual = pd.Series(dtype="float64").reindex(idx)

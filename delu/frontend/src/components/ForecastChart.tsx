@@ -1,690 +1,226 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { accentFor, berlinDay, berlinLong, targetLabel } from "../lib/api";
+import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, Minus, MousePointer2, Move, Plus, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { init, use as registerCharts, type EChartsType } from "echarts/core";
+import { LineChart } from "echarts/charts";
+import { DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, TooltipComponent } from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
+import { berlinLong, targetLabel, type ForecastData } from "../lib/api";
+import {
+  ACTUAL_COLOR, CHART_COLORS, HOUR, chartOptions, fitWindow, forecastDomain,
+  formatDay, formatTimestamp, formatValue, windowFromZoom, withTimeGaps, zoomWindow,
+  type ChartVisibility,
+} from "./forecast-chart-options";
+import "./forecast-chart.css";
 
-interface Props {
-  timestamps: string[];
-  p50: (number | null)[];
-  p10: (number | null)[] | null;
-  p20: (number | null)[] | null;
-  p30: (number | null)[] | null;
-  p40: (number | null)[] | null;
-  p60: (number | null)[] | null;
-  p70: (number | null)[] | null;
-  p80: (number | null)[] | null;
-  p90: (number | null)[] | null;
-  actual: (number | null)[];
-  unit: string;
-  builtAt: string;
-  target: string;
+registerCharts([LineChart, DataZoomComponent, GridComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, CanvasRenderer]);
+
+export function ForecastChart({ data, unit }: { data: ForecastData; unit: string }) {
+  const chartData = useMemo(() => withTimeGaps(data), [data]);
+  return <InteractiveForecastChart data={chartData} unit={unit} />;
 }
 
-const PAD = { l: 68, r: 16, t: 30, b: 30 };
-
-const ACTUAL = "#e9eeea";
-const GRID = "#22332a";
-const TEXT = "#8fa096";
-const NIGHT = "#101815";
-
-function fmt(n: number): string {
-  return n.toLocaleString("en-GB", { maximumFractionDigits: 1 });
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const m = hex.replace("#", "");
-  const v = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
-  const r = parseInt(v.slice(0, 2), 16);
-  const g = parseInt(v.slice(2, 4), 16);
-  const b = parseInt(v.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function niceTicks(lo: number, hi: number, target = 4): number[] {
-  const raw = (hi - lo) / target;
-  if (raw <= 0) return [lo];
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = (raw / mag >= 5 ? 10 : raw / mag >= 2 ? 5 : raw / mag >= 1 ? 2 : 1) * mag;
-  const out: number[] = [];
-  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
-  return out;
-}
-
-interface BerlinInfo {
-  dateKey: string;
-  weekday: number;
-}
-
-const partsFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Berlin",
-  weekday: "short",
-  day: "numeric",
-  month: "numeric",
-});
-
-const hmFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Berlin",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function berlinInfo(iso: string): BerlinInfo {
-  const parts = partsFmt.formatToParts(new Date(iso));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  const wd = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[get("weekday")] ?? 1;
-  return { dateKey: `${get("day")}.${get("month")}`, weekday: wd };
-}
-
-export function ForecastChart({
-  timestamps,
-  p50,
-  p10,
-  p20,
-  p30,
-  p40,
-  p60,
-  p70,
-  p80,
-  p90,
-  actual,
-  unit,
-  builtAt,
-  target,
-}: Props) {
-  const accent = accentFor(target);
+function InteractiveForecastChart({ data, unit }: { data: ForecastData; unit: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const [hover, setHover] = useState<number | null>(null);
+  const chartRef = useRef<EChartsType | null>(null);
+  const domain = useMemo(() => forecastDomain(data) ?? { start: 0, end: HOUR }, [data]);
+  const [window, setWindow] = useState(domain);
+  const [visibility, setVisibility] = useState<ChartVisibility>({ actual: true, forecast: true, intervals: true });
+  const [compact, setCompact] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [inspectedIndex, setInspectedIndex] = useState<number | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const accent = CHART_COLORS[data.meta.target] ?? CHART_COLORS.load_actual_mw;
+  const hasActual = data.actual.some((value) => value !== null);
+  const hasForecast = data.p50.some((value) => value !== null);
+  const hasIntervals = data.p10?.some((value, i) => value != null && data.p90?.[i] != null) ?? false;
+  const fullRange = Math.abs(window.start - domain.start) < 1000 && Math.abs(window.end - domain.end) < 1000;
+  const duration = window.end - window.start;
+  const inspect = useCallback((index: number) => setInspectedIndex(index), []);
+  const options = useMemo(() => chartOptions({ data, unit, window, visibility, compact, onInspect: inspect }), [data, unit, window, visibility, compact, inspect]);
 
   useEffect(() => {
-    const el = plotRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setSize({
-        w: entry.contentRect.width,
-        h: entry.contentRect.height,
+    const plot = plotRef.current;
+    if (!plot) return;
+    const chart = init(plot, undefined, { renderer: "canvas" });
+    chartRef.current = chart;
+    chart.on("datazoom", (event: unknown) => {
+      const next = windowFromZoom(event, domain);
+      if (next) { setWindow(next); setInspectedIndex(null); }
+    });
+    let resizeFrame = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        setCompact(entry.contentRect.width < 600);
+        chart.resize({ width: entry.contentRect.width, height: entry.contentRect.height });
       });
     });
-    ro.observe(el);
-    return () => ro.disconnect();
+    observer.observe(plot);
+    return () => { observer.disconnect(); cancelAnimationFrame(resizeFrame); chart.dispose(); chartRef.current = null; };
+  }, [domain]);
+
+  useEffect(() => {
+    chartRef.current?.setOption(options, { replaceMerge: ["series"] });
+  }, [options]);
+
+  useEffect(() => {
+    const onFullscreen = () => setFullscreen(document.fullscreenElement === rootRef.current);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => document.removeEventListener("fullscreenchange", onFullscreen);
   }, []);
 
-  const geom = useMemo(() => {
-    const { w, h } = size;
-    if (w < 80 || h < 80 || timestamps.length === 0) return null;
-
-    const vals: number[] = [];
-    for (const v of p50) if (v !== null) vals.push(v);
-    if (p10) for (const v of p10) if (v !== null) vals.push(v);
-    if (p90) for (const v of p90) if (v !== null) vals.push(v);
-    for (const v of actual) if (v !== null) vals.push(v);
-    if (vals.length === 0) return null;
-
-    let lo = Math.min(...vals);
-    let hi = Math.max(...vals);
-    if (lo === hi) {
-      lo -= 1;
-      hi += 1;
-    }
-    const pad = (hi - lo) * 0.06;
-    lo -= pad;
-    hi += pad;
-
-    const iw = w - PAD.l - PAD.r;
-    const ih = h - PAD.t - PAD.b;
-    const n = timestamps.length;
-    const x = (i: number) => PAD.l + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
-    const y = (v: number) => PAD.t + (1 - (v - lo) / (hi - lo)) * ih;
-
-    const segPath = (series: (number | null)[]) => {
-      let d = "";
-      let pen = false;
-      for (let i = 0; i < series.length; i++) {
-        const v = series[i];
-        if (v === null) {
-          pen = false;
-          continue;
-        }
-        d += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
-        pen = true;
-      }
-      return d;
-    };
-
-    const bandPath = (lower: (number | null)[] | null, upper: (number | null)[] | null) => {
-      if (!lower || !upper) return "";
-      let d = "";
-      let run: number[] = [];
-      const flush = () => {
-        if (run.length > 1) {
-          let s = "";
-          for (const i of run) {
-            const value = lower[i];
-            if (value !== null) {
-              s += `${s ? "L" : "M"}${x(i).toFixed(1)},${y(value).toFixed(1)}`;
-            }
-          }
-          for (let k = run.length - 1; k >= 0; k--) {
-            const i = run[k];
-            const value = upper[i];
-            if (value !== null) {
-              s += `L${x(i).toFixed(1)},${y(value).toFixed(1)}`;
-            }
-          }
-          d += `${s}Z`;
-        }
-        run = [];
-      };
-      for (let i = 0; i < n; i++) {
-        if (lower[i] !== null && upper[i] !== null) run.push(i);
-        else flush();
-      }
-      flush();
-      return d;
-    };
-
-    const line = segPath(p50);
-    const q10 = p10 ? segPath(p10) : "";
-    const q90 = p90 ? segPath(p90) : "";
-    const band = bandPath(p10, p90);
-    const innerBands = [bandPath(p20, p80), bandPath(p30, p70), bandPath(p40, p60)];
-    const actualLine = segPath(actual);
-    const area =
-      !band && line
-        ? `${line}L${x(n - 1).toFixed(1)},${(PAD.t + ih).toFixed(1)}L${x(0).toFixed(1)},${(PAD.t + ih).toFixed(1)}Z`
-        : "";
-    const gateIdx = p50.findIndex((v) => v !== null);
-    const hasBands = q10 !== "" || q90 !== "";
-
-    const yticks = niceTicks(lo, hi);
-
-    const days: { start: number; end: number; key: string; weekend: boolean }[] = [];
-    let info = berlinInfo(timestamps[0]);
-    let cur = { start: 0, end: 0, key: info.dateKey, weekend: info.weekday >= 6 };
-    for (let i = 1; i < n; i++) {
-      info = berlinInfo(timestamps[i]);
-      if (info.dateKey !== cur.key) {
-        days.push(cur);
-        cur = { start: i, end: i, key: info.dateKey, weekend: info.weekday >= 6 };
-      }
-      cur.end = i;
-    }
-    days.push(cur);
-
-    const longSpan = days.length > 2;
-    const xticks = longSpan
-      ? days.map((d) => ({
-          i: Math.round((d.start + d.end) / 2),
-          label: berlinDay(timestamps[d.start]),
-        }))
-      : timestamps.flatMap((t, i) => {
-          const hm = hmFmt.format(new Date(t));
-          return Number(hm.slice(0, 2)) % 3 === 0 && hm.endsWith("00") ? [{ i, label: hm }] : [];
-        });
-
-    const originLabel =
-      gateIdx > 0
-        ? longSpan
-          ? berlinDay(timestamps[gateIdx])
-          : hmFmt.format(new Date(timestamps[gateIdx]))
-        : "";
-
-    return {
-      w,
-      h,
-      ih,
-      lo,
-      hi,
-      x,
-      y,
-      line,
-      area,
-      band,
-      innerBands,
-      q10,
-      q90,
-      actualLine,
-      gateIdx,
-      hasBands,
-      yticks,
-      xticks,
-      days,
-      longSpan,
-      n,
-      originLabel,
-      showZero: lo < 0 && hi > 0,
-    };
-  }, [size, timestamps, p50, p10, p20, p30, p40, p60, p70, p80, p90, actual]);
-
-  if (size.w >= 80 && geom === null) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-night text-sm text-white/60">
-        No values in this forecast.
-      </div>
-    );
-  }
-
-  const hv = hover;
-  const hvx = geom && hv !== null ? geom.x(hv) : 0;
-  const tipLeft = geom ? (hvx > geom.w * 0.6 ? hvx - 14 : hvx + 14) : 0;
-  const tipSide = geom && hvx > geom.w * 0.6 ? "right" : "left";
-
-  const bandFill = hexToRgba(accent, 0.13);
-  const bandEdge = hexToRgba(accent, 0.03);
-  const qLine = hexToRgba(accent, 0.62);
-  const gateX = geom && geom.gateIdx > 0 ? geom.x(geom.gateIdx) : 0;
-  const gateLabelX = geom
-    ? Math.min(Math.max(gateX, PAD.l + 64), geom.w - PAD.r - 64)
-    : 0;
-  const histWide = geom && geom.gateIdx > 0 ? gateX - PAD.l > 96 : false;
-
-  const swatch = (stroke: string, dashed = false) => (
-    <svg width="22" height="8" aria-hidden="true">
-      <line
-        x1="1"
-        y1="4"
-        x2="21"
-        y2="4"
-        stroke={stroke}
-        strokeWidth={dashed ? 1.5 : 2.25}
-        strokeDasharray={dashed ? "4 3" : undefined}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-
-  const dot = (fill: string, hollow = false) => (
-    <span
-      aria-hidden="true"
-      className="inline-block size-2 flex-none rounded-full"
-      style={
-        hollow
-          ? { border: `1.5px solid ${fill}`, background: "transparent" }
-          : { background: fill }
-      }
-    />
-  );
-
-  const hvActual = hv !== null ? actual[hv] : null;
-  const hvP50 = hv !== null ? p50[hv] : null;
-  const hvP10 = hv !== null ? p10?.[hv] ?? null : null;
-  const hvP90 = hv !== null ? p90?.[hv] ?? null : null;
-  const hvDelta =
-    hvActual != null && hvP50 != null ? hvActual - hvP50 : null;
-  const hvWidth = hvP10 != null && hvP90 != null ? hvP90 - hvP10 : null;
-
-  const stepHover = (d: number) => {
-    if (!geom) return;
-    setHover((prev) => {
-      const base = prev ?? geom.gateIdx ?? 0;
-      return Math.max(0, Math.min(geom.n - 1, base + d));
-    });
+  const changeMode = (selected: boolean) => {
+    setSelectionMode(selected);
+    chartRef.current?.dispatchAction({ type: "takeGlobalCursor", key: "dataZoomSelect", dataZoomSelectActive: selected });
   };
+  const reset = () => {
+    setWindow(domain); setInspectedIndex(null); changeMode(false);
+    chartRef.current?.dispatchAction({ type: "hideTip" });
+  };
+  const pan = (direction: number) => setWindow((current) => fitWindow(current.start + direction * (current.end - current.start) * 0.75, current.end - current.start, domain));
+  const zoom = (factor: number) => setWindow((current) => zoomWindow(current, factor, domain));
+  const selectHours = (hours: number) => {
+    const firstForecast = data.p50.findIndex((value) => value !== null);
+    const forecastStart = firstForecast < 0 ? domain.start : Date.parse(data.timestamps[firstForecast]);
+    setWindow(fitWindow(fullRange ? forecastStart : window.start, hours * HOUR, domain));
+    setInspectedIndex(null);
+  };
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await rootRef.current?.requestFullscreen();
+    } catch { setAnnouncement("Fullscreen is unavailable in this browser."); }
+  };
+  const exportImage = async () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const image = new Image();
+    image.src = chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#fff", excludeComponents: ["toolbox"] });
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(image.width, 1400);
+    canvas.height = image.height + 220;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#17211c";
+    context.font = "600 32px sans-serif";
+    context.fillText(`${targetLabel(data.meta.target)} forecast · ${data.meta.span === "d10" ? "10-day horizon" : "Day-ahead"} · DE–LU`, 48, 48);
+    context.fillStyle = "#4b5b51";
+    context.font = "22px sans-serif";
+    context.fillText(`${formatTimestamp(window.start)} to ${formatTimestamp(window.end)}`, 48, 86);
+    const keys = [
+      { label: "Forecast · P50", color: accent, band: false, visible: visibility.forecast },
+      { label: "Actual", color: ACTUAL_COLOR, band: false, visible: visibility.actual },
+      { label: "P10–P90 interval", color: accent, band: true, visible: hasIntervals && visibility.forecast && visibility.intervals },
+    ];
+    let legendX = 48;
+    for (const key of keys.filter((entry) => entry.visible)) {
+      context.fillStyle = key.color;
+      context.globalAlpha = key.band ? 0.25 : 1;
+      context.fillRect(legendX, key.band ? 105 : 111, 32, key.band ? 16 : 3);
+      context.globalAlpha = 1;
+      context.fillStyle = "#4b5b51";
+      context.fillText(key.label, legendX + 44, 120);
+      legendX += 44 + context.measureText(key.label).width + 40;
+    }
+    context.drawImage(image, 0, 140);
+    context.fillText(`DELU · Built ${berlinLong(data.meta.generated_at)} · Europe/Berlin · ${unit}`, 48, canvas.height - 32);
+    const link = document.createElement("a");
+    link.download = `delu-${data.meta.target}-${data.meta.date}-${data.meta.span}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click(); setAnnouncement("Chart image saved.");
+  };
+  const inspectPoint = (direction: number, edge?: "start" | "end") => {
+    const first = Math.max(0, data.timestamps.findIndex((value) => Date.parse(value) >= window.start));
+    const last = data.timestamps.findLastIndex((value) => Date.parse(value) <= window.end);
+    const index = edge === "start" ? first : edge === "end" ? last : Math.max(first, Math.min(last, (inspectedIndex ?? first - direction) + direction));
+    if (index < 0) return;
+    setInspectedIndex(index);
+    chartRef.current?.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: index });
+    const forecast = visibility.forecast ? data.p50[index] : null;
+    const actual = visibility.actual ? data.actual[index] : null;
+    setAnnouncement(`${formatTimestamp(Date.parse(data.timestamps[index]))}. ${forecast != null ? `Forecast ${formatValue(forecast)} ${unit}.` : ""} ${actual != null ? `Actual ${formatValue(actual)} ${unit}.` : ""}`);
+  };
+  const presets = data.meta.span === "d10" ? [{ label: "24h", hours: 24 }, { label: "48h", hours: 48 }, { label: "7d", hours: 168 }]
+    : [{ label: "6h", hours: 6 }, { label: "12h", hours: 12 }, { label: "24h", hours: 24 }];
+  const title = `${targetLabel(data.meta.target)} forecast`;
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-night">
-      <div className="flex flex-none flex-wrap items-center justify-between gap-2 px-5 pt-4 pb-1">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-white/70">
-          <span className="flex items-center gap-2">
-            {swatch(ACTUAL)}
-            Actual
-          </span>
-          <span className="flex items-center gap-2">
-            {swatch(accent)}
-            {geom?.hasBands ? "Median · P50" : "Forecast"}
-          </span>
-          {geom?.hasBands ? (
-            <>
-              <span className="flex items-center gap-2">
-                {swatch(qLine, true)}
-                P10
-              </span>
-              <span className="flex items-center gap-2">
-                {swatch(qLine, true)}
-                P90
-              </span>
-            </>
-          ) : null}
+    <div className="forecast-chart" ref={rootRef}>
+      <div className="forecast-chart-heading">
+        <div className="forecast-chart-title">
+          <h2>{title}</h2>
+          <span>{data.meta.span === "d10" ? "10-day horizon" : "Day-ahead"}<span aria-hidden="true"> · </span>DE–LU</span>
         </div>
-        <span className="flex items-center gap-2 text-xs tnum">
-          <span
-            aria-hidden="true"
-            className="inline-block size-2 rounded-full"
-            style={{ background: accent }}
-          />
-          <span translate="no" className="font-semibold text-white/90">
-            {targetLabel(target)}
-          </span>
-          <span aria-hidden="true" className="text-white/40">
-            ·
-          </span>
-          <span className="text-white/40">{unit}</span>
-          <span aria-hidden="true" className="text-white/40">
-            ·
-          </span>
-          <span className="text-white/40">Built {berlinLong(builtAt)}</span>
-        </span>
+        <span className="forecast-chart-published">Built {berlinLong(data.meta.generated_at)}</span>
       </div>
 
-      <div
-        ref={plotRef}
-        className="relative min-h-[320px] flex-1 px-2 pb-2 outline-none lg:min-h-0"
-        onPointerLeave={() => setHover(null)}
-        tabIndex={0}
-        role="application"
-        aria-label={`${targetLabel(target)} forecast chart. Use left and right arrow keys to inspect values.`}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            stepHover(-1);
-          } else if (e.key === "ArrowRight") {
-            e.preventDefault();
-            stepHover(1);
-          } else if (e.key === "Home") {
-            e.preventDefault();
-            setHover(0);
-          } else if (e.key === "End") {
-            e.preventDefault();
-            if (geom) setHover(geom.n - 1);
-          } else if (e.key === "Escape") {
-            setHover(null);
+      <div className="forecast-chart-toolbar">
+        <div className="forecast-range-presets" role="group" aria-label="Visible time range">
+          <button type="button" aria-pressed={fullRange} onClick={reset}>Full horizon</button>
+          {presets.filter(({ hours }) => hours * HOUR < domain.end - domain.start).map(({ label, hours }) => (
+            <button key={label} type="button" aria-pressed={!fullRange && Math.abs(duration - hours * HOUR) < 1000} onClick={() => selectHours(hours)}>{label}</button>
+          ))}
+        </div>
+        <div className="forecast-chart-tools">
+          <div role="group" aria-label="Navigate chart">
+            <button type="button" aria-label="Pan earlier" title="Pan earlier" disabled={window.start <= domain.start} onClick={() => pan(-1)}><ChevronLeft /></button>
+            <button type="button" aria-label="Zoom in" title="Zoom in (+)" disabled={duration <= HOUR} onClick={() => zoom(0.5)}><Plus /></button>
+            <button type="button" aria-label="Zoom out" title="Zoom out (−)" disabled={fullRange} onClick={() => zoom(2)}><Minus /></button>
+            <button type="button" aria-label="Pan later" title="Pan later" disabled={window.end >= domain.end} onClick={() => pan(1)}><ChevronRight /></button>
+          </div>
+          <div role="group" aria-label="Chart interaction">
+            <button type="button" aria-label="Pan mode" title="Drag to pan" aria-pressed={!selectionMode} onClick={() => changeMode(false)}><Move /></button>
+            <button type="button" aria-label="Select to zoom" title="Drag across the plot to zoom" aria-pressed={selectionMode} onClick={() => changeMode(true)}><MousePointer2 /></button>
+          </div>
+          <div role="group" aria-label="Chart actions">
+            <button type="button" aria-label="Reset chart range" title="Reset to full horizon" disabled={fullRange && !selectionMode} onClick={reset}><RotateCcw /></button>
+            <button type="button" aria-label="Save chart image" title="Save chart as PNG" onClick={exportImage}><Download /></button>
+            <button type="button" aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen chart"} title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="forecast-chart-legend" role="group" aria-label="Chart series">
+        <button type="button" aria-pressed={visibility.forecast} disabled={!hasForecast || !visibility.actual || !hasActual} onClick={() => setVisibility((current) => ({ ...current, forecast: !current.forecast }))}>
+          <span className="forecast-line-key" style={{ backgroundColor: accent }} />Forecast · P50
+        </button>
+        <button type="button" aria-pressed={visibility.actual} disabled={!hasActual || !visibility.forecast || !hasForecast} onClick={() => setVisibility((current) => ({ ...current, actual: !current.actual }))}>
+          <span className="forecast-line-key" style={{ backgroundColor: ACTUAL_COLOR }} />Actual
+        </button>
+        {hasIntervals ? <button type="button" aria-pressed={visibility.intervals} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, intervals: !current.intervals }))} title="Show or hide nested P10–P90 forecast intervals">
+          <span className="forecast-band-key" style={{ backgroundColor: accent }} />P10–P90 interval
+        </button> : null}
+        <span className="forecast-chart-zone">Europe/Berlin</span>
+      </div>
+
+      <div className="forecast-chart-canvas" ref={plotRef} tabIndex={0} role="group"
+        aria-label={`${title}. Left and right arrows inspect values. Plus and minus zoom. Shift and arrow keys pan. Home and End inspect the edges. Escape clears the tooltip.`}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+            event.preventDefault();
+            const direction = event.key === "ArrowLeft" ? -1 : 1;
+            if (event.shiftKey) pan(direction); else inspectPoint(direction);
+          } else if (event.key === "+" || event.key === "=" || event.key === "-") {
+            event.preventDefault(); zoom(event.key === "-" ? 2 : 0.5);
+          } else if (event.key === "Home" || event.key === "End") {
+            event.preventDefault(); inspectPoint(0, event.key === "Home" ? "start" : "end");
+          } else if (event.key === "Escape") {
+            setInspectedIndex(null); changeMode(false); chartRef.current?.dispatchAction({ type: "hideTip" });
           }
         }}
-      >
-        {geom ? (
-          <>
-            <svg
-              width={geom.w}
-              height={geom.h}
-              className="block touch-pan-y"
-              role="img"
-              aria-label={`${targetLabel(target)} forecast, ${geom.n} points`}
-              onPointerMove={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const px = e.clientX - rect.left;
-                const i = Math.round(
-                  ((px - PAD.l) / (geom.w - PAD.l - PAD.r)) * (geom.n - 1),
-                );
-                setHover(Math.max(0, Math.min(geom.n - 1, i)));
-              }}
-              onPointerDown={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const px = e.clientX - rect.left;
-                const i = Math.round(
-                  ((px - PAD.l) / (geom.w - PAD.l - PAD.r)) * (geom.n - 1),
-                );
-                setHover(Math.max(0, Math.min(geom.n - 1, i)));
-              }}
-            >
-              <defs>
-                <linearGradient id="band-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={bandFill} />
-                  <stop offset="100%" stopColor={bandEdge} />
-                </linearGradient>
-                <linearGradient id="area-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={hexToRgba(accent, 0.16)} />
-                  <stop offset="100%" stopColor={hexToRgba(accent, 0)} />
-                </linearGradient>
-              </defs>
-
-              {geom.longSpan
-                ? geom.days
-                    .filter((d) => d.weekend)
-                    .map((d, k) => (
-                      <rect
-                        key={k}
-                        x={geom.x(d.start)}
-                        y={PAD.t}
-                        width={Math.max(0, geom.x(d.end) - geom.x(d.start))}
-                        height={geom.ih}
-                        fill="rgba(255,255,255,0.03)"
-                      />
-                    ))
-                : null}
-
-              {geom.yticks.map((v, k) => (
-                <g key={k}>
-                  <line
-                    x1={PAD.l}
-                    x2={geom.w - PAD.r}
-                    y1={geom.y(v)}
-                    y2={geom.y(v)}
-                    stroke={GRID}
-                    strokeWidth={1}
-                  />
-                  <text x={PAD.l - 10} y={geom.y(v) + 4} textAnchor="end" fontSize={11} fill={TEXT}>
-                    {fmt(v)}
-                  </text>
-                </g>
-              ))}
-
-              {geom.showZero ? (
-                <line
-                  x1={PAD.l}
-                  x2={geom.w - PAD.r}
-                  y1={geom.y(0)}
-                  y2={geom.y(0)}
-                  stroke="#3c5246"
-                  strokeWidth={1}
-                  strokeDasharray="4 4"
-                />
-              ) : null}
-
-              {geom.longSpan
-                ? geom.days.slice(1).map((d, k) => (
-                    <line
-                      key={k}
-                      x1={geom.x(d.start)}
-                      x2={geom.x(d.start)}
-                      y1={PAD.t}
-                      y2={PAD.t + geom.ih}
-                      stroke={GRID}
-                      strokeWidth={1}
-                    />
-                  ))
-                : null}
-
-              {geom.gateIdx > 0 ? (
-                <rect
-                  x={PAD.l}
-                  y={PAD.t}
-                  width={Math.max(0, gateX - PAD.l)}
-                  height={geom.ih}
-                  fill="rgba(255,255,255,0.025)"
-                />
-              ) : null}
-
-              {geom.band ? <path d={geom.band} fill="url(#band-grad)" /> : null}
-              {geom.innerBands.map((path, index) =>
-                path ? <path key={index} d={path} fill={hexToRgba(accent, 0.1 + index * 0.03)} /> : null,
-              )}
-              {geom.q10 ? (
-                <path d={geom.q10} fill="none" stroke={qLine} strokeWidth={1.25} strokeDasharray="4 3" />
-              ) : null}
-              {geom.q90 ? (
-                <path d={geom.q90} fill="none" stroke={qLine} strokeWidth={1.25} strokeDasharray="4 3" />
-              ) : null}
-              {geom.actualLine ? (
-                <path d={geom.actualLine} fill="none" stroke={ACTUAL} strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" />
-              ) : null}
-              {!geom.band && geom.area ? <path d={geom.area} fill="url(#area-grad)" /> : null}
-              {geom.line ? (
-                <path d={geom.line} fill="none" stroke={accent} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
-              ) : null}
-
-              {geom.gateIdx > 0 ? (
-                <g>
-                  <line
-                    x1={gateX}
-                    x2={gateX}
-                    y1={PAD.t}
-                    y2={PAD.t + geom.ih}
-                    stroke="#46584d"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                  />
-                  {histWide ? (
-                    <text x={PAD.l + 10} y={PAD.t - 10} fontSize={11} fill={TEXT}>
-                      Actual
-                    </text>
-                  ) : null}
-                  <text
-                    x={gateLabelX}
-                    y={PAD.t - 10}
-                    textAnchor="middle"
-                    fontSize={11}
-                    fill={TEXT}
-                  >
-                    {`Forecast ▸ ${geom.originLabel}`}
-                  </text>
-                </g>
-              ) : null}
-
-              {geom.xticks.map((t, k) => (
-                <text
-                  key={k}
-                  x={Math.min(Math.max(geom.x(t.i), PAD.l + 18), geom.w - PAD.r - 18)}
-                  y={geom.h - 8}
-                  textAnchor="middle"
-                  fontSize={11}
-                  fill={TEXT}
-                >
-                  {t.label}
-                </text>
-              ))}
-
-              {hv !== null ? (
-                <g>
-                  <line
-                    x1={geom.x(hv)}
-                    x2={geom.x(hv)}
-                    y1={PAD.t}
-                    y2={PAD.t + geom.ih}
-                    stroke="#ffffff"
-                    strokeOpacity={0.35}
-                    strokeWidth={1}
-                  />
-                  {hvP50 !== null && hvP50 !== undefined ? (
-                    <circle
-                      cx={geom.x(hv)}
-                      cy={geom.y(hvP50)}
-                      r={4}
-                      fill={accent}
-                      stroke={NIGHT}
-                      strokeWidth={2}
-                    />
-                  ) : null}
-                  {hvActual !== null && hvActual !== undefined ? (
-                    <circle
-                      cx={geom.x(hv)}
-                      cy={geom.y(hvActual)}
-                      r={4}
-                      fill={ACTUAL}
-                      stroke={NIGHT}
-                      strokeWidth={2}
-                    />
-                  ) : null}
-                  {hvP10 !== null && hvP10 !== undefined ? (
-                    <circle
-                      cx={geom.x(hv)}
-                      cy={geom.y(hvP10)}
-                      r={3}
-                      fill={NIGHT}
-                      stroke={qLine}
-                      strokeWidth={1.5}
-                    />
-                  ) : null}
-                  {hvP90 !== null && hvP90 !== undefined ? (
-                    <circle
-                      cx={geom.x(hv)}
-                      cy={geom.y(hvP90)}
-                      r={3}
-                      fill={NIGHT}
-                      stroke={qLine}
-                      strokeWidth={1.5}
-                    />
-                  ) : null}
-                </g>
-              ) : null}
-            </svg>
-
-            {hv !== null ? (
-              <div
-                aria-live="polite"
-                className="pointer-events-none absolute top-8 min-w-[228px] rounded-md border border-white/10 bg-[#1a2620] px-3 py-2 text-xs shadow-xl tnum"
-                style={tipSide === "left" ? { left: tipLeft } : { right: geom.w - tipLeft }}
-              >
-                <div className="font-medium text-white/90">{berlinLong(timestamps[hv])}</div>
-                <dl className="mt-1 grid gap-1">
-                  {hvActual !== null && hvActual !== undefined ? (
-                    <div className="flex items-baseline justify-between gap-6">
-                      <dt className="flex items-center gap-2 text-white/60">
-                        {dot(ACTUAL)}
-                        Actual
-                      </dt>
-                      <dd className="font-semibold text-white/90">
-                        {fmt(hvActual)} {unit}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {hvP50 !== null && hvP50 !== undefined ? (
-                    <div className="flex items-baseline justify-between gap-6">
-                      <dt className="flex items-center gap-2 text-white/60">
-                        {dot(accent)}
-                        Median · P50
-                      </dt>
-                      <dd className="font-semibold" style={{ color: accent }}>
-                        {fmt(hvP50)} {unit}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {hvP10 !== null && hvP10 !== undefined ? (
-                    <div className="flex items-baseline justify-between gap-6">
-                      <dt className="flex items-center gap-2 text-white/60">
-                        {dot(qLine, true)}
-                        P10
-                      </dt>
-                      <dd className="text-white/80">
-                        {fmt(hvP10)} {unit}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {hvP90 !== null && hvP90 !== undefined ? (
-                    <div className="flex items-baseline justify-between gap-6">
-                      <dt className="flex items-center gap-2 text-white/60">
-                        {dot(qLine, true)}
-                        P90
-                      </dt>
-                      <dd className="text-white/80">
-                        {fmt(hvP90)} {unit}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
-                {hvDelta !== null || hvWidth !== null ? (
-                  <div className="mt-1.5 border-t border-white/10 pt-1.5 text-white/45">
-                    {hvDelta !== null ? (
-                      <div className="flex items-baseline justify-between gap-6">
-                        <span>Actual − P50</span>
-                        <span>
-                          {hvDelta >= 0 ? "+" : "−"}
-                          {fmt(Math.abs(hvDelta))} {unit}
-                        </span>
-                      </div>
-                    ) : null}
-                    {hvWidth !== null ? (
-                      <div className="flex items-baseline justify-between gap-6">
-                        <span>80% interval width</span>
-                        <span>
-                          {fmt(hvWidth)} {unit}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        ) : null}
+      />
+      {!hasForecast && !hasActual ? <p className="forecast-chart-empty">No values in this forecast.</p> : null}
+      <div className="forecast-navigator-labels" aria-hidden="true"><span>{formatDay(domain.start)}</span><span>Full timeline · drag handles to narrow</span><span>{formatDay(domain.end)}</span></div>
+      <div className="forecast-chart-footer">
+        <span className="forecast-window-label" aria-live="polite">{formatTimestamp(window.start)} <span aria-hidden="true">→</span> {formatTimestamp(window.end)}</span>
+        <span className="forecast-chart-hint">{selectionMode ? "Drag across the plot to zoom" : "Drag to pan · Ctrl + scroll to zoom"}</span>
       </div>
+      <span className="sr-only" role="status">{announcement}</span>
     </div>
   );
 }
