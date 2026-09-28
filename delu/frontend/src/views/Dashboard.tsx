@@ -166,9 +166,9 @@ export function Dashboard({
               variant="outline"
               onClick={refresh}
               disabled={pending}
-              className={
-                arming ? "border-ink-soft text-ink hover:bg-brand-tint" : undefined
-              }
+              className={arming
+                ? "border-danger text-danger hover:bg-danger-tint focus-visible:outline-danger"
+                : "border-info text-info hover:bg-info-tint focus-visible:outline-info"}
             >
               {pending
                 ? "Refreshing…"

@@ -113,12 +113,12 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
     const visibleKeys = [
       ...(visibility.forecast ? [{ label: "Median forecast · P50", color: accent, band: false, dashed: false }] : []),
       ...(visibility.actual ? [{ label: "Actual", color: palette.actual, band: false, dashed: true }] : []),
-      ...(visibility.forecast ? intervals.filter(({ key }) => visibility.ranges[key]).map(({ label }) => ({ label, color: accent, band: true, dashed: false })) : []),
+      ...(visibility.forecast ? intervals.filter(({ key }) => visibility.ranges[key]).map(({ label, intensity }) => ({ label, color: accent, band: true, dashed: false, intensity })) : []),
     ];
     const measure = canvas.getContext("2d");
     if (!measure) return;
     measure.font = `500 ${24 * exportScale}px ${bodyFont}`;
-    const legendRows: { x: number; y: number; label: string; color: string; band: boolean; dashed: boolean }[] = [];
+    const legendRows: { x: number; y: number; label: string; color: string; band: boolean; dashed: boolean; intensity?: number }[] = [];
     let legendX = edge;
     let legendY = 164 * exportScale;
     for (const key of visibleKeys) {
@@ -153,7 +153,7 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
     context.font = `500 ${24 * exportScale}px ${bodyFont}`;
     for (const key of legendRows) {
       context.fillStyle = key.color;
-      context.globalAlpha = key.band ? palette.bandKeyOpacity : 1;
+      context.globalAlpha = key.band ? palette.bandKeyOpacity * (key.intensity ?? 1) : 1;
       if (key.dashed) {
         for (let x = 0; x < 26; x += 9) context.fillRect(key.x + x * exportScale, key.y + 13 * exportScale, 6 * exportScale, 2 * exportScale);
       } else {
@@ -232,8 +232,8 @@ function InteractiveForecastChart({ data, unit, theme, controls }: { data: Forec
         <button type="button" aria-pressed={visibility.actual} disabled={!hasActual || !visibility.forecast || !hasForecast} onClick={() => setVisibility((current) => ({ ...current, actual: !current.actual }))}>
           <span className="forecast-line-key forecast-actual-key" style={{ color: palette.actual }} />Actual
         </button>
-        {intervals.map(({ key, label }) => <button key={key} type="button" aria-pressed={visibility.ranges[key]} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, ranges: { ...current.ranges, [key]: !current.ranges[key] } }))} title={`Show or hide ${label} range`}>
-          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity }} />{label}
+        {intervals.map(({ key, label, intensity }) => <button key={key} type="button" aria-pressed={visibility.ranges[key]} disabled={!visibility.forecast} onClick={() => setVisibility((current) => ({ ...current, ranges: { ...current.ranges, [key]: !current.ranges[key] } }))} title={`Show or hide ${label} range`}>
+          <span className="forecast-band-key" style={{ backgroundColor: accent, opacity: palette.bandKeyOpacity * intensity }} />{label}
         </button>)}
       </div>
 

@@ -53,7 +53,7 @@ export function DeleteAccountCard({ onDeleted }: { onDeleted: () => void }) {
                 variant="outline"
                 onClick={confirm}
                 disabled={pending || !password}
-                className="border-ink-soft text-ink hover:bg-brand-tint"
+                className="border-danger text-danger hover:bg-danger-tint focus-visible:outline-danger"
               >
                 {pending ? "Deleting…" : "Delete everything"}
               </Button>
@@ -75,7 +75,7 @@ export function DeleteAccountCard({ onDeleted }: { onDeleted: () => void }) {
             <Button
               variant="outline"
               onClick={() => setArming(true)}
-              className="border-ink-soft text-ink hover:bg-brand-tint"
+              className="border-danger text-danger hover:bg-danger-tint focus-visible:outline-danger"
             >
               Delete account
             </Button>

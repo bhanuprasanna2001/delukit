@@ -54,10 +54,10 @@ export interface ChartVisibility {
 }
 
 export const INTERVALS = [
-  { key: "p10p90", label: "P10–P90", lower: "p10", upper: "p90" },
-  { key: "p20p80", label: "P20–P80", lower: "p20", upper: "p80" },
-  { key: "p30p70", label: "P30–P70", lower: "p30", upper: "p70" },
-  { key: "p40p60", label: "P40–P60", lower: "p40", upper: "p60" },
+  { key: "p10p90", label: "P10–P90", lower: "p10", upper: "p90", intensity: 0.55 },
+  { key: "p20p80", label: "P20–P80", lower: "p20", upper: "p80", intensity: 0.8 },
+  { key: "p30p70", label: "P30–P70", lower: "p30", upper: "p70", intensity: 1.1 },
+  { key: "p40p60", label: "P40–P60", lower: "p40", upper: "p60", intensity: 1.5 },
 ] as const;
 
 export type IntervalKey = typeof INTERVALS[number]["key"];
@@ -283,7 +283,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
     lineStyle: { color: palette.actual, width: 2, type: "dashed" },
   });
   if (visibility.forecast) {
-    for (const { key, label, lower: lowerKey, upper: upperKey } of INTERVALS) {
+    for (const { key, label, lower: lowerKey, upper: upperKey, intensity } of INTERVALS) {
       if (!visibility.ranges[key]) continue;
       const lower = data[lowerKey];
       const upper = data[upperKey];
@@ -293,7 +293,7 @@ export function chartOptions({ data, unit, window, visibility, compact, theme, o
       series.push(
         { ...line(`${label} base`, base, "transparent"), stack: label, stackStrategy: "all", silent: true, z: 1, tooltip: { show: false } },
         { ...line(`${label} interval`, width, "transparent"), stack: label, stackStrategy: "all", silent: true, z: 1,
-          areaStyle: { color: accent, opacity: palette.bandOpacity }, tooltip: { show: false } },
+          areaStyle: { color: accent, opacity: palette.bandOpacity * intensity }, tooltip: { show: false } },
       );
     }
   }
