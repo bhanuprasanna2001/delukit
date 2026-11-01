@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1376,15 +1376,15 @@ wheels = [
 
 [[package]]
 name = "openstef"
-version = "4.4.3"
+version = "4.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openstef-core" },
     { name = "openstef-models", extra = ["xgb-cpu"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/cf/5fcaa17899cf3845f1b874c2bb3be64a61c9851aa166468f1cf813bc9fbe/openstef-4.4.3.tar.gz", hash = "sha256:763aa977b2531763132cc5f7c5bf08ab5991e7db92faa90886eaa0ddae110e1b", size = 3812348, upload-time = "2026-09-21T07:29:18.586Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/66/54090ebd43b1698cb96a3531de1ba6df4d5975411f640b16871b6752e928/openstef-4.7.0.tar.gz", hash = "sha256:86da052e095e98950ee9942960e517d09952604326fa191866f5aa98b039ad45", size = 3837630, upload-time = "2026-10-26T16:25:45.583Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/b3/372f7b921bbc7da44132e11fb9b0ed25fc21ef7e2dd375da5e1d6b0aec2b/openstef-4.4.3-py3-none-any.whl", hash = "sha256:591644faacbc044097ae67641c341c84633dd16d7d06b085c5992a5d1eb5a742", size = 9088, upload-time = "2026-09-21T07:29:09.867Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/8b/8ab6aec0eca50d3bd0de7e60776cc0636b3d3d61c56286c2d21202f3d5df/openstef-4.7.0-py3-none-any.whl", hash = "sha256:f8768431ff550635524a45326acc7422467200611eef0904cd9c4daddba2f99e", size = 9098, upload-time = "2026-10-26T16:25:36.065Z" },
 ]
 
 [[package]]
@@ -1404,24 +1404,25 @@ wheels = [
 
 [[package]]
 name = "openstef-core"
-version = "4.4.3"
+version = "4.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "joblib" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-extra-types" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/18/ff65d010fcb103e62deae58e82f4482f072d824509cee05195f806ae2971/openstef_core-4.4.3.tar.gz", hash = "sha256:700b1165c9fac4164096dc68344083630945a267c3b22eea00af1a079696ea6e", size = 60636, upload-time = "2026-09-21T07:29:20.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/33/c9caf156d5bf8456b02d2a196ab952287d65cc0ac15115b58ba5e37974ca/openstef_core-4.7.0.tar.gz", hash = "sha256:8fcb0a570bdbcdadefc4c39b2d54f6ed1ff473ca510292cf29214fce6b423fe0", size = 62505, upload-time = "2026-10-26T16:25:47.994Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/b5/3c1886e2cca131b56e94ceada8a386742d62d66d73338367864ef5e591e7/openstef_core-4.4.3-py3-none-any.whl", hash = "sha256:b904dd23dd51b1f7cab4838e0563a36831a132d2b3a3f407d9317020673fa0a3", size = 56541, upload-time = "2026-09-21T07:29:12.735Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/49/3cb538b32675954dbe3bc7691c4dbad260ef7ada8b7fe1967bb2f3506dd5/openstef_core-4.7.0-py3-none-any.whl", hash = "sha256:f88bef73610803e925635364bdf3b7cbc4ffeddc904f05ee22ffbf82625e52de", size = 57960, upload-time = "2026-10-26T16:25:39.402Z" },
 ]
 
 [[package]]
 name = "openstef-models"
-version = "4.4.3"
+version = "4.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "holidays" },
@@ -1433,9 +1434,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/b0/20f714f393097185b397ff07108cb743418350d7e1c210d42a8ba7a63fa1/openstef_models-4.4.3.tar.gz", hash = "sha256:53406e5921abd8dd9dac02a34c19d7cc2ea488b3d238f0d9c756ab4758d03590", size = 167901, upload-time = "2026-09-21T07:29:23.993Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/1f/939231e79a3ad71276eb19fc9c476823f6dac8c2b5590dac71361151c59d/openstef_models-4.7.0.tar.gz", hash = "sha256:12a629fd6889cdb848408426f4b2de3ec14f7f9f922bcd1946459bf702a18969", size = 173223, upload-time = "2026-10-26T16:25:51.102Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/ce/08acd529c5b29ca6c678f46be61d2bd29bb094c5b46c6a71f1e8d0273d7d/openstef_models-4.4.3-py3-none-any.whl", hash = "sha256:2096cc54b389c57a2c1c13c8c33954eb143337fea860f4ed3bebf275dd578bab", size = 173646, upload-time = "2026-09-21T07:29:17.004Z" },
+    { url = "https://files.pythonhosted.org/packages/36/69/b0749da932462e83ae862db109ae4ace58654eaf8ebf5ac7193628c8c1bb/openstef_models-4.7.0-py3-none-any.whl", hash = "sha256:e3503a5b1a95a6b9bae455ee3a68962aefab1054e067d188b6fdb74da8ffa130", size = 177604, upload-time = "2026-10-26T16:25:44.025Z" },
 ]
 
 [package.optional-dependencies]
